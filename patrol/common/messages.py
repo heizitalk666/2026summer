@@ -70,6 +70,50 @@ def validate(msg: dict, msg_type: str | None = None) -> dict:
     return msg
 
 
+_NUMERIC_BOUND_KEYS = ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum")
+
+
+def _strip_bounds(node):
+    """递归去掉 Schema 里的数值上下界，只留结构约束。"""
+    if isinstance(node, dict):
+        return {k: _strip_bounds(v) for k, v in node.items()
+                if k not in _NUMERIC_BOUND_KEYS}
+    if isinstance(node, list):
+        return [_strip_bounds(v) for v in node]
+    return node
+
+
+@lru_cache(maxsize=None)
+def structural_validator_for(msg_type: str) -> Draft202012Validator:
+    """只校验结构的 Schema：必填、类型、枚举、additionalProperties，**不含数值范围**。
+
+    网关的五项校验里 schema 与 range 是两层，分工必须清楚（ICD §4.4）：
+
+    - ``schema`` 管结构。报文长得对不对，有没有夹带协议外的字段。
+    - ``range``  管数值。依据是 gateway/limits.py 里硬编码的常量，那是安全
+      边界的唯一真值。
+
+    如果 schema 层连数值范围一起校验，越界指令会在 schema 就被拦下，
+    ``checks.range`` 永远不会出现 FAIL——而 ICD §4.6 的拒绝示例恰恰是
+    ``{"schema":"PASS","range":"FAIL"}`` 配 ``PARAM_OUT_OF_RANGE``。
+    那样一来 checks 字段"让网关有没有在校验这件事可观测"的作用就没了。
+
+    Schema 里保留 minimum/maximum 仍然有价值：它是报文层的纵深防御，也让
+    Schema 文件自身可读。两处必须同步，由 tools/validate.py 第 8 项保证。
+    """
+    return Draft202012Validator(_strip_bounds(load_schema(msg_type)))
+
+
+def validate_structure(msg: dict, msg_type: str | None = None) -> dict:
+    """只查结构，不查数值范围。网关的 schema 层用它。"""
+    mt = msg_type or msg.get("msg_type")
+    errs = sorted(structural_validator_for(mt).iter_errors(msg),
+                  key=lambda e: list(e.absolute_path))
+    if errs:
+        raise SchemaViolation(mt, errs)
+    return msg
+
+
 def check_version(msg: dict) -> None:
     """ICD §2.6：只比主版本号，不匹配直接丢弃，不做兼容性猜测。"""
     got = str(msg.get("schema_version", ""))

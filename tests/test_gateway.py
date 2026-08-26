@@ -1,0 +1,235 @@
+"""安全网关：三层机制必须可当场演示，不能只是声明。
+
+方案书 §7.4「可验证性」：安全设计的说服力不在于声明，而在于可以当场演示
+三件事——构造越界指令时网关拒绝并留下审计记录；强制终止识别进程后车辆
+自行恢复巡航；注入安全事件时正在进行的测量在 200 ms 内中止。
+本文件覆盖第一、二件，第三件在 test_fsm.py。
+"""
+from __future__ import annotations
+
+import json
+import threading
+import time
+from pathlib import Path
+
+import pytest
+
+from patrol.common import messages as M
+from patrol.common.bus import Requester
+from patrol.common.clock import stamps
+from patrol.common.config import Config
+from patrol.common.ids import new_run_id, new_uuid
+from patrol.gateway import limits as L
+from patrol.gateway.node import GatewayNode
+
+RUN_ID = new_run_id()
+
+
+def mk(command, params, *, issued_by="MISSION_FSM", timeout_ms=2000, **kw):
+    mono, utc = stamps()
+    d = {"schema_version": "1.0.0", "msg_type": "CONTROL_COMMAND",
+         "cmd_id": new_uuid(), "seq": 1, "ts_mono_ns": mono, "ts_utc_ms": utc,
+         "run_id": RUN_ID, "event_id": new_uuid(), "issued_by": issued_by,
+         "command": command, "params": params, "timeout_ms": timeout_ms}
+    d.update(kw)
+    return d
+
+
+@pytest.fixture()
+def gw(cfg_ports, tmp_path):
+    cfg = Config.load(overrides={
+        "bus": cfg_ports.get("bus"),
+        "gateway": {"audit_log": str(tmp_path / "audit.jsonl")},
+        "logging": {"dir": str(tmp_path / "logs"), "level": "ERROR"},
+    })
+    node = GatewayNode(cfg, seed=11)
+    yield node
+    node.close()
+
+
+# ---------------------------------------------------------------- 白名单
+def test_whitelist_has_no_low_level_control():
+    """协议层：识别模块在协议上无法表达底层控制意图。"""
+    assert L.WHITELIST == {"PAUSE", "RESUME", "CREEP_FORWARD",
+                           "GOTO_OBSERVE", "PTZ_SET", "HEARTBEAT"}
+    for forbidden in ("SET_SPEED", "SET_STEER", "SET_TORQUE", "BRAKE"):
+        assert forbidden not in L.WHITELIST_WITH_RATE
+
+
+def test_forbidden_params_rejected_even_on_legal_command(gw):
+    """command 合法但 params 夹带底层控制量，一样拒绝。"""
+    ack = gw.handle_command(mk("PAUSE", {"reason": "VERIFY_REQUEST", "steer_deg": 12.0}))
+    assert ack["result"] == "REJECTED"
+    assert ack["checks"]["whitelist"] == "PASS"
+    assert ack["checks"]["schema"] == "FAIL"
+
+
+# ---------------------------------------------------------------- 越界
+@pytest.mark.parametrize("cmd,params", [
+    ("CREEP_FORWARD", {"distance_m": 1.20}),
+    ("CREEP_FORWARD", {"distance_m": 0.01}),
+    ("GOTO_OBSERVE", {"waypoint_id": "WP-07", "tolerance_m": 0.90}),
+    ("PTZ_SET", {"pan_deg": 200.0, "tilt_deg": 0.0, "zoom": 1.0, "speed": "NORMAL"}),
+    ("PTZ_SET", {"pan_deg": 0.0, "tilt_deg": -60.0, "zoom": 1.0, "speed": "NORMAL"}),
+    ("PTZ_SET", {"pan_deg": 0.0, "tilt_deg": 0.0, "zoom": 5.0, "speed": "NORMAL"}),
+    ("PTZ_RATE", {"pan_dps": 180.0, "tilt_dps": 0.0, "ttl_ms": 300}),
+    ("PTZ_RATE", {"pan_dps": 10.0, "tilt_dps": 0.0, "ttl_ms": 5000}),
+])
+def test_out_of_range_is_rejected_not_truncated(gw, cmd, params):
+    """越界一律拒绝，**不做截断**。
+
+    截断会让 AI 侧的 bug 静默通过：发了 5 m 的 CREEP_FORWARD 被截成 0.5 m
+    照常执行，联调时看不出问题，等到某次截断逻辑失效就出事。
+    """
+    ack = gw.handle_command(mk(cmd, params))
+    assert ack["result"] == "REJECTED"
+    assert ack["reject_code"] == "PARAM_OUT_OF_RANGE"
+    assert ack["exec_handle"] is None
+    # ICD §4.6 的拒绝示例：schema 通过、range 失败
+    assert ack["checks"]["schema"] == "PASS"
+    assert ack["checks"]["range"] == "FAIL"
+
+
+def test_reject_detail_matches_icd_format(gw):
+    ack = gw.handle_command(mk("CREEP_FORWARD", {"distance_m": 1.20}))
+    assert ack["reject_detail"] == "CREEP_FORWARD.distance_m=1.200 exceeds [0.05,0.50]"
+
+
+def test_unknown_waypoint(gw):
+    ack = gw.handle_command(mk("GOTO_OBSERVE", {"waypoint_id": "WP-99", "tolerance_m": 0.2}))
+    assert ack["reject_code"] == "UNKNOWN_WAYPOINT"
+
+
+def test_100_out_of_range_commands_all_blocked(gw):
+    """方案书 §9.3 验收项：构造超范围指令 100 次，拦截率 100 %，有审计记录。"""
+    import numpy as np
+    rng = np.random.default_rng(5)
+    blocked = 0
+    for i in range(100):
+        kind = i % 4
+        if kind == 0:
+            c = mk("CREEP_FORWARD", {"distance_m": float(rng.uniform(0.51, 8.0))})
+        elif kind == 1:
+            c = mk("PTZ_SET", {"pan_deg": float(rng.uniform(171, 400)), "tilt_deg": 0.0,
+                               "zoom": 1.0, "speed": "NORMAL"})
+        elif kind == 2:
+            c = mk("PTZ_SET", {"pan_deg": 0.0, "tilt_deg": 0.0,
+                               "zoom": float(rng.uniform(3.01, 20.0)), "speed": "NORMAL"})
+        else:
+            c = mk("GOTO_OBSERVE", {"waypoint_id": "WP-07",
+                                    "tolerance_m": float(rng.uniform(0.51, 5.0))})
+        ack = gw.handle_command(c)
+        if ack["result"] == "REJECTED" and ack["reject_code"] == "PARAM_OUT_OF_RANGE":
+            blocked += 1
+    assert blocked == 100, "拦截率必须是 100 %"
+
+    # 审计记录必须留下
+    lines = Path(gw.audit.path).read_text(encoding="utf-8").strip().splitlines()
+    recs = [json.loads(x) for x in lines]
+    rejected = [r for r in recs if r["result"] == "REJECTED"]
+    assert len(rejected) >= 100
+    assert all(r["checks"]["range"] == "FAIL" for r in rejected[-100:])
+
+
+def test_checks_are_observable(gw):
+    """checks 字段让"网关到底有没有在校验"可观测。
+
+    评审时抽查日志，如果某一项长期是 SKIP，说明那层校验根本没接上。
+    """
+    ack = gw.handle_command(mk("PTZ_SET", {"pan_deg": 0.0, "tilt_deg": 0.0,
+                                           "zoom": 1.0, "speed": "NORMAL"}))
+    assert ack["result"] == "ACCEPTED"
+    assert all(v == "PASS" for v in ack["checks"].values()), \
+        "合法指令必须五项全 PASS，没有一项是 SKIP"
+
+
+def test_ack_passes_schema(gw):
+    for c in (mk("PTZ_SET", {"pan_deg": 0.0, "tilt_deg": 0.0, "zoom": 1.0, "speed": "NORMAL"}),
+              mk("CREEP_FORWARD", {"distance_m": 9.9})):
+        M.validate(gw.handle_command(c), "COMMAND_ACK")
+
+
+# ---------------------------------------------------------------- 看门狗
+def test_watchdog_timeout_issues_resume(gw, monkeypatch):
+    """心跳丢失 → 网关自行下发 RESUME，让车**走完路线**而不是停住。"""
+    from patrol.common import clock
+    gw.handle_command(mk("HEARTBEAT", {"mission_state": "CRUISE"}))
+    assert not gw.watchdog.triggered
+
+    # 把单调钟往前推 2 秒，模拟 mission 进程死了
+    base = clock.mono_ns()
+    monkeypatch.setattr("patrol.gateway.watchdog.mono_ns",
+                        lambda: base + 2_000_000_000)
+    assert gw.watchdog.check() is True
+    assert gw.watchdog.check() is False, "只触发一次"
+
+    ack = gw.handle_command(mk("PTZ_SET", {"pan_deg": 0.0, "tilt_deg": 0.0,
+                                           "zoom": 1.0, "speed": "NORMAL"}))
+    assert ack["reject_code"] == "HEARTBEAT_LOST", "看门狗态下拒绝一切 MISSION_FSM 指令"
+
+    # 看门狗自己下发的 RESUME 不受此限
+    ack2 = gw.handle_command(mk("RESUME", {}, issued_by="WATCHDOG"))
+    assert ack2["result"] == "ACCEPTED"
+
+
+def test_watchdog_recovers_after_three_heartbeats(gw, monkeypatch):
+    from patrol.common import clock
+    base = clock.mono_ns()
+    monkeypatch.setattr("patrol.gateway.watchdog.mono_ns", lambda: base + 2_000_000_000)
+    assert gw.watchdog.check() is True
+    monkeypatch.undo()
+    for i in range(L.HEARTBEAT_RECOVER_COUNT):
+        released = gw.watchdog.on_heartbeat()
+        assert released == (i == L.HEARTBEAT_RECOVER_COUNT - 1)
+    assert not gw.watchdog.triggered
+
+
+def test_heartbeat_constants_match_icd():
+    """C2：取 ICD 的 5 Hz 而非方案书的 2 Hz。1500 ms 超时下 5 Hz 要连丢 7 条。"""
+    assert L.HEARTBEAT_PERIOD_MS == 200
+    assert L.HEARTBEAT_TIMEOUT_MS == 1500
+    assert L.WATCHDOG_ACTION == "RESUME"
+    assert L.HEARTBEAT_TIMEOUT_MS / L.HEARTBEAT_PERIOD_MS >= 7
+
+
+# ---------------------------------------------------------------- 安全事件
+def test_safety_event_blocks_motion_commands(gw):
+    """底盘安全层介入期间，网关拒绝一切运动指令，但云台指令放行。
+
+    云台放行是有意的：复核中止时恰恰需要把云台归位。
+    """
+    gw.chassis.force_safety_event("OBSTACLE_DETECTED")
+    time.sleep(0.05)
+    assert gw.handle_command(mk("RESUME", {}))["reject_code"] == "SAFETY_OVERRIDE"
+    ack = gw.handle_command(mk("PTZ_SET", {"pan_deg": 0.0, "tilt_deg": 0.0,
+                                           "zoom": 1.0, "speed": "NORMAL"}))
+    assert ack["result"] == "ACCEPTED", "云台动作不改变车辆运动，安全事件期间应放行"
+
+
+def test_estop_requires_manual_clear(gw):
+    """急停是唯一不能自恢复的安全事件。"""
+    gw.chassis.force_safety_event("ESTOP_PRESSED")
+    time.sleep(0.05)
+    ack = gw.handle_command(mk("RESUME", {}, issued_by="WATCHDOG"))
+    assert ack["reject_code"] in ("ESTOP_ACTIVE", "SAFETY_OVERRIDE")
+    gw.chassis.clear_estop()
+    time.sleep(0.05)
+
+
+# ---------------------------------------------------------------- 端到端
+def test_end_to_end_over_zeromq(gw):
+    """真的走一遍 REQ/REP，证明传输层通。"""
+    t = threading.Thread(target=gw.serve_forever, daemon=True)
+    t.start()
+    time.sleep(0.2)
+    req = Requester(gw.cfg.get("bus.command"), timeout_ms=2000)
+    try:
+        ack = req.request(mk("HEARTBEAT", {"mission_state": "CRUISE"}))
+        assert ack["result"] == "ACCEPTED"
+        ack = req.request(mk("CREEP_FORWARD", {"distance_m": 1.20}))
+        assert ack["reject_code"] == "PARAM_OUT_OF_RANGE"
+        M.validate(ack, "COMMAND_ACK")
+    finally:
+        req.close()
+        gw.stop()
+        t.join(timeout=2.0)
