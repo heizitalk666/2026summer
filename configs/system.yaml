@@ -1,0 +1,144 @@
+# 主配置。四个节点进程共用这一份。
+#
+# 差异清单 A1–A4 四条争议全部实现为下面的开关，默认取推荐的一侧。
+# D3 评审时改一行即可切到另一侧做对比演示。
+includes:
+  - scene.yaml
+  - stub.yaml
+  - waypoints.yaml
+  - camera.yaml
+
+# ---------------------------------------------------------------- 驱动
+# 全仓库唯一区分桩和真机的开关（ICD §8.7）。除 drivers/factory.py 外，
+# 任何其他文件出现 if mode == "stub" 都算违反本约定，评审时会检查。
+driver_mode: stub          # stub | real
+
+# ---------------------------------------------------------------- 传输
+# ICD §1.2 原文是 ipc://，但 ipc 在 Windows 上不可用。ICD 已预留切换口子。
+bus:
+  detection: tcp://127.0.0.1:15001    # IF-1  perception → mission
+  command:   tcp://127.0.0.1:15002    # IF-2  mission → gateway (REQ/REP)
+  status:    tcp://127.0.0.1:15003    # IF-3  gateway → mission + perception
+
+logging:
+  level: INFO
+  dir: logs
+
+# ---------------------------------------------------------------- 感知
+perception:
+  fps: 10                   # 巡航态帧率。ICD §5.2：由跟踪连续性定，不是算力妥协
+  detector: synthetic       # synthetic | yolo   （代码先行，权重就位后改这里）
+  model:
+    cruise:  {name: yolo11s, conf_threshold: 0.25, quant: INT8}
+    verify:  {name: yolo11m, conf_threshold: 0.60, quant: INT8}
+    nms_iou: 0.45
+    input_w: 640
+    input_h: 640
+  yolo:
+    weights_cruise: training/runs/cruise/weights/best.pt
+    weights_verify: training/runs/verify/weights/best.pt
+    device: cpu
+  tracker:
+    iou_threshold: 0.3
+    max_age_frames: 15
+  # === A4：图像质量评价。ICD 把四项指标丢了，这里补回来并显式定义 ===
+  quality:
+    enabled: true
+    weights:                # 四项指标的加权，加权和即方案书的质量总分 Q
+      pixel_density: 0.50
+      blur: 0.20
+      highlight: 0.20
+      occlusion: 0.10
+    threshold: 0.75         # Q < 0.75 触发主动测量（方案书 §6.4）
+    pixel_density_target: 120.0   # 由 0.5 % FS 精度反推（方案书 §5.3.2）
+  l3:
+    enabled: true
+    model: efficientad_s
+    threshold: 0.55
+
+# ---------------------------------------------------------------- 任务层
+mission:
+  # === A1：云台伺服模式 ===
+  # open_loop = ICD v1.0 原样，一次 PTZ_SET + 等 at_target（开环指向）
+  # pid       = 差异清单推荐，PTZ_RATE 速率闭环，可导出阶跃响应曲线
+  servo:
+    mode: pid               # pid | open_loop
+    period_ms: 100          # 控制周期，与巡航帧率一致
+    kp: 0.40
+    ki: 0.05
+    kd: 0.02
+    gain_schedule: true     # ω = θ/(W·z)·u。关掉它变焦到 3× 会振荡（可现场演示）
+    integral_separation_px: 150.0   # |e| 超过它暂停积分累积（抗积分饱和）
+    integral_max: 500.0
+    deadband_px: 20.0       # 稳态偏差判据（方案书 §2.3）
+    rate_ttl_ms: 300        # PTZ_RATE 自失效时长
+  # === A3：复核采集模式 ===
+  # burst       = ICD v1.0 原样，同一位姿连拍 3 帧（抗抖动），0.6 s
+  # multiview   = 方案书原样，无条件三视角（抗反光），2.1 s
+  # conditional = 差异清单推荐，默认连拍，高光时才追加辅视角
+  capture:
+    mode: conditional       # conditional | burst | multiview
+    burst_n: 3
+    burst_interval_ms: 150
+    aux_offset_deg: 15.0    # 辅视角左右偏转角
+    aux_settle_ms: 500
+    aux_grab_ms: 200
+    highlight_trigger: 0.12 # highlight_ratio 超过它就追加辅视角
+    multiview_spread_limit_pct_fs: 0.5  # 三视角读数极差上限
+  # 十状态机的预算与超时（ICD §7.2，C1 取 ICD 一侧）
+  # CAPTURE 超时按 A3 放宽到 4.0 s，否则走辅视角路径必然超时进 ABORT
+  fsm:
+    budget_s:  {SUSPECT: 0.3, HALT_REQ: 2.0, AIM: 1.5, ZOOM: 1.5,
+                CAPTURE: 0.6, VERIFY: 2.5, PACK: 0.5, RESUME: 0.3}
+    timeout_s: {SUSPECT: 0.5, HALT_REQ: 4.0, AIM: 3.0, ZOOM: 2.5,
+                CAPTURE: 4.0, VERIFY: 5.0, PACK: 2.0, RESUME: 1.0, ABORT: 1.0}
+    suspect_confirm_frames: 3     # C10：统一为三帧
+  # 三重抑制 + 两条来自别处的抑制（ICD §7.3）
+  suppress:
+    track_cooldown_s: 60.0
+    waypoint_radius_m: 2.0
+    resume_silence_s: 3.0
+  # 复核预算（ICD §7.4）。T_r 由 fsm.budget_s 实时加总，不写死 8.8 s
+  budget:
+    route_length_m: 200.0
+    cruise_speed_mps: 0.5
+    max_run_seconds: 600.0
+  # === A2：首版缺陷类别 ===
+  # 差异清单推荐：以方案书为准，渗漏油换成开关分合位（公开数据可得性）
+  first_release_classes: [PRESSURE_GAUGE, INDICATOR_LIGHT, SWITCH_HANDLE]
+
+# ---------------------------------------------------------------- 网关
+# 注意：参数范围**不在这里**。它们硬编码在 patrol/gateway/limits.py，
+# 网关不从任何配置读取范围值（ICD §4.3 / §10.2）。这里只有非安全项。
+gateway:
+  status_rate_hz: 20
+  enable_ptz_rate: true     # 是否接受 A1 的 PTZ_RATE 指令
+  audit_log: logs/gateway-audit.jsonl
+
+# ---------------------------------------------------------------- 上传
+uploader:
+  evidence_dir: evidence
+  transport: http           # http | mqtt   （http 单机零依赖，mqtt 接 mosquitto）
+  cloud_url: http://127.0.0.1:8000
+  mqtt:
+    host: 127.0.0.1
+    port: 1883
+    topic_tpl: patrol/{site_id}/{run_id}/evidence
+    qos: 1
+  site_id: SITE-01
+  retry_limit: 5
+  # === B3：证据包视频。任务书要求"图像、视频、定位、时间和识别结果" ===
+  video:
+    enabled: true
+    pre_seconds: 3.0
+    post_seconds: 2.0
+    fps: 10
+  retention:
+    max_days: 7
+    max_gb: 20.0
+
+cloud:
+  host: 127.0.0.1
+  port: 8000
+  db: cloud/patrol.db
+  storage: cloud/storage

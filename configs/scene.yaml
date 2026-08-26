@@ -1,0 +1,107 @@
+# 虚拟配电室。只在 driver_mode: stub 时加载，真机模式不读这个文件。
+#
+# 这是无硬件条件下跑通全链路的关键：每个目标的位置、尺寸、**指针真实角度**
+# 都是已知真值。相机桩按 (车位姿, pan, tilt, zoom) 从这个世界渲染出图像，
+# 于是：
+#   - 像素密度公式 p = W·D·z/(2d·tan(θ/2)) 在渲染图上是真的成立的
+#   - 读数算法必须真的从像素里解算角度，真值只用于打分，绝不许被算法读到
+#   - 0.5 % FS 基本误差、重复性、线性度现在就能测出数来
+scene:
+  # 房间尺寸，仅用于渲染背景与地面透视
+  room: {length_m: 18.0, width_m: 8.0, height_m: 3.2}
+  lighting:
+    ambient_lux: 180          # 配电室设计照度 100–300 lx，属低照度
+    color_temp_k: 4000
+    # 顶部灯具在表盘玻璃上形成的镜面高光。方案书 §4.3.1 把它列为本场景
+    # 最主要的光学干扰源，也是 A3 条件式三视角要规避的东西。
+    specular:
+      enabled: true
+      sources: [{x_m: 6.0, y_m: 0.0, z_m: 3.0}, {x_m: 12.0, y_m: 0.0, z_m: 3.0}]
+      strength: 0.85
+      angular_width_deg: 12.0
+  noise:
+    gaussian_sigma: 3.0       # 低照度下的读出噪声
+    vignette: 0.18            # 镜头阴影
+    motion_blur_gain: 0.9     # 每 (m/s) 的模糊像素数，车动时糊
+
+  # ---- 目标清单。position 是 map 系，facing 是表盘法线的朝向角 ----
+  targets:
+    # 压力表：走 L2 读数通路。truth.value 是真值，渲染时指针按它画。
+    - id: TGT-01
+      class: PRESSURE_GAUGE
+      waypoint: WP-07
+      position: {x_m: 12.43, y_m: 1.82, z_m: 1.45}
+      facing_deg: 270.0
+      diameter_m: 0.15        # target_size_m 的先验值，查表得到
+      truth:
+        kind: POINTER_GAUGE
+        value: 0.42           # MPa
+        unit: MPa
+        range_min: 0.0
+        range_max: 1.6
+        sweep_deg: 270.0      # 表盘量程对应转角
+        zero_offset_deg: -135.0   # 零刻度相对表盘正上方的角度
+        normal_band: [0.30, 1.20]
+        major_ticks: 27
+    - id: TGT-02
+      class: PRESSURE_GAUGE
+      waypoint: WP-03
+      position: {x_m: 10.20, y_m: 1.82, z_m: 1.50}
+      facing_deg: 270.0
+      diameter_m: 0.15
+      truth:
+        kind: POINTER_GAUGE
+        value: 0.95
+        unit: MPa
+        range_min: 0.0
+        range_max: 1.6
+        sweep_deg: 270.0
+        zero_offset_deg: -135.0
+        normal_band: [0.30, 1.20]
+        major_ticks: 27
+    # 指示灯屏：走 L2 分类通路
+    - id: TGT-03
+      class: INDICATOR_LIGHT
+      waypoint: WP-08
+      position: {x_m: 8.00, y_m: 1.82, z_m: 1.60}
+      facing_deg: 270.0
+      diameter_m: 0.03
+      truth: {kind: INDICATOR_LIGHT, value: GREEN, normal_states: [GREEN]}
+    - id: TGT-04
+      class: INDICATOR_LIGHT
+      waypoint: WP-08
+      position: {x_m: 8.00, y_m: 1.82, z_m: 1.52}
+      facing_deg: 270.0
+      diameter_m: 0.03
+      truth: {kind: INDICATOR_LIGHT, value: RED, normal_states: [GREEN]}
+    # 开关把手：走 L2 分类通路（A2 用它替换 OIL_LEAK）
+    - id: TGT-05
+      class: SWITCH_HANDLE
+      waypoint: WP-09
+      position: {x_m: 4.00, y_m: 1.82, z_m: 1.20}
+      facing_deg: 270.0
+      diameter_m: 0.18
+      truth: {kind: SWITCH_POSITION, value: CLOSED, normal_states: [CLOSED]}
+    - id: TGT-06
+      class: SWITCH_HANDLE
+      waypoint: WP-09
+      position: {x_m: 4.00, y_m: 1.82, z_m: 0.95}
+      facing_deg: 270.0
+      diameter_m: 0.18
+      truth: {kind: SWITCH_POSITION, value: OPEN, normal_states: [CLOSED]}
+    # 未知异常：走 L3 通路。非监督方法不需要标注数据，正好绕开
+    # 方案书 §2.4.5 那条卡死外观缺陷的数据可得性约束。
+    - id: TGT-07
+      class: FOREIGN_OBJECT
+      waypoint: WP-06
+      position: {x_m: 13.60, y_m: 7.60, z_m: 0.80}
+      facing_deg: 180.0
+      diameter_m: 0.25
+      truth: {kind: ANOMALY, value: UNKNOWN}
+      anomalous: true
+
+  # 巡检路线：车按这条折线走，pose_stub 据此生成位姿序列
+  route:
+    speed_mps: 0.5
+    loop: true
+    points: [WP-01, WP-02, WP-03, WP-04, WP-05, WP-06, WP-09, WP-08, WP-07, WP-10]

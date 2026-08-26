@@ -1,0 +1,19 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# 运行产物
+logs/
+evidence/
+cloud/patrol.db
+cloud/storage/
+*.jsonl
+
+# 训练产物
+training/datasets/
+training/runs/
+*.pt
+*.onnx
+*.rknn

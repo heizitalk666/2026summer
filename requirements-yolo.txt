@@ -1,0 +1,5 @@
+# 可选：真实检测模型后端。约 2.5 GB，代码跑通后再装。
+# 装好后把 configs/system.yaml 的 perception.detector 改成 yolo。
+-r requirements.txt
+ultralytics>=8.2
+torch>=2.2

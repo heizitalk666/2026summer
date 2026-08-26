@@ -1,0 +1,13 @@
+# 边缘端 + 云端。约 80 MB，学生笔记本可直接装。
+numpy>=1.26
+opencv-python>=4.9        # 无显示环境可换 opencv-python-headless
+pyzmq>=25.0
+pyyaml>=6.0
+jsonschema>=4.20
+fastapi>=0.110
+uvicorn>=0.27
+python-multipart>=0.0.9
+paho-mqtt>=1.6
+pyserial>=3.5
+requests>=2.31
+pytest>=8.0

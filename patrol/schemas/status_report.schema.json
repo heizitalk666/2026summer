@@ -1,0 +1,381 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://patrol.local/schemas/status_report.schema.json",
+  "title": "StatusReport",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "msg_type",
+    "seq",
+    "ts_mono_ns",
+    "ts_utc_ms",
+    "run_id",
+    "report_kind",
+    "chassis",
+    "ptz",
+    "pose",
+    "watchdog"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "msg_type": {
+      "const": "STATUS_REPORT"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "ts_mono_ns": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "ts_utc_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^\\d{8}-\\d{6}-[0-9a-f]{4}$"
+    },
+    "report_kind": {
+      "enum": [
+        "PERIODIC",
+        "SAFETY_EVENT",
+        "EXEC_UPDATE"
+      ]
+    },
+    "chassis": {
+      "type": "object",
+      "required": [
+        "state",
+        "speed_mps",
+        "path_progress",
+        "distance_to_goal_m",
+        "current_waypoint_id",
+        "battery_pct",
+        "safety_layer_active"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "enum": [
+            "MOVING",
+            "STOPPING",
+            "STOPPED",
+            "PAUSED",
+            "RETURNING",
+            "FAULT",
+            "ESTOP"
+          ]
+        },
+        "speed_mps": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1.5
+        },
+        "path_progress": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "distance_to_goal_m": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "current_waypoint_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^WP-\\d{2}$"
+        },
+        "battery_pct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "safety_layer_active": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ptz": {
+      "type": "object",
+      "required": [
+        "pan_deg",
+        "tilt_deg",
+        "zoom",
+        "hfov_deg",
+        "moving",
+        "focus_state",
+        "at_target"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "pan_deg": {
+          "type": "number",
+          "minimum": -170,
+          "maximum": 170
+        },
+        "tilt_deg": {
+          "type": "number",
+          "minimum": -30,
+          "maximum": 60
+        },
+        "zoom": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 3
+        },
+        "hfov_deg": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 180
+        },
+        "moving": {
+          "type": "boolean"
+        },
+        "focus_state": {
+          "enum": [
+            "FOCUSING",
+            "LOCKED",
+            "FAILED"
+          ]
+        },
+        "at_target": {
+          "type": "boolean"
+        }
+      }
+    },
+    "pose": {
+      "type": "object",
+      "required": [
+        "x_m",
+        "y_m",
+        "yaw_deg",
+        "cov_trace",
+        "valid",
+        "source"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "x_m": {
+          "type": "number"
+        },
+        "y_m": {
+          "type": "number"
+        },
+        "yaw_deg": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180
+        },
+        "cov_trace": {
+          "type": "number",
+          "minimum": 0
+        },
+        "valid": {
+          "type": "boolean"
+        },
+        "source": {
+          "enum": [
+            "LIDAR_SLAM",
+            "ODOM_ONLY",
+            "LOST"
+          ]
+        }
+      }
+    },
+    "watchdog": {
+      "type": "object",
+      "required": [
+        "heartbeat_ok",
+        "last_heartbeat_age_ms",
+        "watchdog_triggered"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "heartbeat_ok": {
+          "type": "boolean"
+        },
+        "last_heartbeat_age_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "watchdog_triggered": {
+          "type": "boolean"
+        }
+      }
+    },
+    "exec": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "required": [
+            "exec_handle",
+            "cmd_id",
+            "progress",
+            "elapsed_ms",
+            "fail_reason"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "exec_handle": {
+              "type": "string"
+            },
+            "cmd_id": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            },
+            "progress": {
+              "enum": [
+                "IN_PROGRESS",
+                "DONE",
+                "FAILED",
+                "PREEMPTED"
+              ]
+            },
+            "elapsed_ms": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "fail_reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "safety": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "required": [
+            "event_type",
+            "severity",
+            "source",
+            "action_taken",
+            "brake_latency_ms",
+            "detail"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "event_type": {
+              "enum": [
+                "OBSTACLE_DETECTED",
+                "BUMPER_HIT",
+                "ESTOP_PRESSED",
+                "TILT_LIMIT",
+                "MOTOR_FAULT",
+                "LOW_BATTERY",
+                "LOCALIZATION_LOST",
+                "HEARTBEAT_LOST",
+                "ILLEGAL_COMMAND",
+                "SCHEMA_VERSION_MISMATCH",
+                "COMM_LOST"
+              ]
+            },
+            "severity": {
+              "enum": [
+                "INFO",
+                "WARN",
+                "CRITICAL"
+              ]
+            },
+            "source": {
+              "enum": [
+                "CHASSIS_SAFETY_LAYER",
+                "GATEWAY",
+                "DRIVER"
+              ]
+            },
+            "action_taken": {
+              "enum": [
+                "NONE",
+                "BRAKE",
+                "ABORT_VERIFY",
+                "FORCE_RESUME",
+                "RETURN_HOME"
+              ]
+            },
+            "brake_latency_ms": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 100
+            },
+            "detail": {
+              "type": "string",
+              "maxLength": 256
+            }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "report_kind": {
+            "const": "SAFETY_EVENT"
+          }
+        },
+        "required": [
+          "report_kind"
+        ]
+      },
+      "then": {
+        "required": [
+          "safety"
+        ],
+        "properties": {
+          "safety": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "report_kind": {
+            "const": "EXEC_UPDATE"
+          }
+        },
+        "required": [
+          "report_kind"
+        ]
+      },
+      "then": {
+        "required": [
+          "exec"
+        ],
+        "properties": {
+          "exec": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  ]
+}

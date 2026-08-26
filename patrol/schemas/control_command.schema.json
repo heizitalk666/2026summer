@@ -1,0 +1,314 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://patrol.local/schemas/control_command.schema.json",
+  "title": "ControlCommand",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "msg_type",
+    "cmd_id",
+    "seq",
+    "ts_mono_ns",
+    "ts_utc_ms",
+    "run_id",
+    "event_id",
+    "issued_by",
+    "command",
+    "params",
+    "timeout_ms"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "msg_type": {
+      "const": "CONTROL_COMMAND"
+    },
+    "cmd_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "ts_mono_ns": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "ts_utc_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^\\d{8}-\\d{6}-[0-9a-f]{4}$"
+    },
+    "event_id": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/uuid"
+        }
+      ]
+    },
+    "issued_by": {
+      "enum": [
+        "MISSION_FSM",
+        "CLOUD_MANUAL",
+        "WATCHDOG"
+      ]
+    },
+    "command": {
+      "enum": [
+        "PAUSE",
+        "RESUME",
+        "CREEP_FORWARD",
+        "GOTO_OBSERVE",
+        "PTZ_SET",
+        "HEARTBEAT"
+      ]
+    },
+    "params": {
+      "type": "object"
+    },
+    "timeout_ms": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 30000
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "const": "PAUSE"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      },
+      "then": {
+        "properties": {
+          "params": {
+            "$ref": "#/$defs/pausePar"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "const": "RESUME"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      },
+      "then": {
+        "properties": {
+          "params": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {}
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "const": "CREEP_FORWARD"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      },
+      "then": {
+        "properties": {
+          "params": {
+            "$ref": "#/$defs/creepPar"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "const": "GOTO_OBSERVE"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      },
+      "then": {
+        "properties": {
+          "params": {
+            "$ref": "#/$defs/gotoPar"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "const": "PTZ_SET"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      },
+      "then": {
+        "properties": {
+          "params": {
+            "$ref": "#/$defs/ptzPar"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "const": "HEARTBEAT"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      },
+      "then": {
+        "properties": {
+          "params": {
+            "$ref": "#/$defs/hbPar"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "pausePar": {
+      "type": "object",
+      "required": [
+        "reason"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "enum": [
+            "VERIFY_REQUEST",
+            "CLOUD_MANUAL",
+            "WATCHDOG_RECOVER"
+          ]
+        }
+      }
+    },
+    "creepPar": {
+      "type": "object",
+      "required": [
+        "distance_m"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "distance_m": {
+          "type": "number",
+          "minimum": 0.05,
+          "maximum": 0.5
+        }
+      }
+    },
+    "gotoPar": {
+      "type": "object",
+      "required": [
+        "waypoint_id",
+        "tolerance_m"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "waypoint_id": {
+          "type": "string",
+          "pattern": "^WP-\\d{2}$"
+        },
+        "tolerance_m": {
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 0.5
+        }
+      }
+    },
+    "ptzPar": {
+      "type": "object",
+      "required": [
+        "pan_deg",
+        "tilt_deg",
+        "zoom",
+        "speed"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "pan_deg": {
+          "type": "number",
+          "minimum": -170.0,
+          "maximum": 170.0
+        },
+        "tilt_deg": {
+          "type": "number",
+          "minimum": -30.0,
+          "maximum": 60.0
+        },
+        "zoom": {
+          "type": "number",
+          "minimum": 1.0,
+          "maximum": 3.0
+        },
+        "speed": {
+          "enum": [
+            "SLOW",
+            "NORMAL"
+          ]
+        }
+      }
+    },
+    "hbPar": {
+      "type": "object",
+      "required": [
+        "mission_state"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "mission_state": {
+          "enum": [
+            "CRUISE",
+            "SUSPECT",
+            "HALT_REQ",
+            "AIM",
+            "ZOOM",
+            "CAPTURE",
+            "VERIFY",
+            "PACK",
+            "RESUME",
+            "ABORT"
+          ]
+        }
+      }
+    }
+  }
+}
