@@ -341,6 +341,57 @@
                 }
               }
             ]
+          },
+          "quality": {
+            "$comment": "差异清单 A4 增补的可选字段（ICD 冻结规则：新增可选字段=次版本号+1，通知即可）。方案书 §6.4 的四项质量指标，ICD v1.0 遗漏。",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "pixel_density_px",
+                  "pixel_density",
+                  "blur",
+                  "highlight",
+                  "occlusion",
+                  "score"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "pixel_density_px": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "pixel_density": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "blur": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "highlight": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "occlusion": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "score": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                }
+              }
+            ]
           }
         }
       }
@@ -414,7 +465,8 @@
                 "L2_UNREADABLE",
                 "L2_OUT_OF_BAND",
                 "L3_ANOMALY",
-                "MANUAL"
+                "MANUAL",
+                "QUALITY_LOW"
               ]
             }
           ]

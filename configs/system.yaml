@@ -53,11 +53,18 @@ perception:
     pixel_density_target: 120.0   # 由 0.5 % FS 精度反推（方案书 §5.3.2）
   l3:
     enabled: true
-    model: efficientad_s
-    threshold: 0.55
+    model: efficientad_s      # 权重就位后启用；无权重时自动退回统计法
+    threshold: 0.55           # 异常分按"偏离正常分布几个 σ"计，除以 6 归一，
+                              # 故 0.55 对应 3.3σ 的经典离群判据
+    warmup: 30                # 少于这么多正常样本时一律判正常，避免冷启动误报
 
 # ---------------------------------------------------------------- 任务层
 mission:
+  # 巡航时云台的固定指向。车沿 y=-3.18 的过道向东行驶（yaw=0），柜面在
+  # y=+1.82，即车的正左方，所以 pan 取 +90°（base_link 的 +y 是左）。
+  # 复核时状态机会把它转到目标上，复核结束后归位到这个巡航姿态。
+  cruise_ptz: {pan_deg: 90.0, tilt_deg: 2.0, zoom: 1.0}
+
   # === A1：云台伺服模式 ===
   # open_loop = ICD v1.0 原样，一次 PTZ_SET + 等 at_target（开环指向）
   # pid       = 差异清单推荐，PTZ_RATE 速率闭环，可导出阶跃响应曲线

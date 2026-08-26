@@ -201,25 +201,27 @@ class SceneRenderer:
                   (sx + 0.5, sy + 0.2, sz - 0.02), (sx - 0.5, sy + 0.2, sz - 0.02)],
                  (238, 240, 244))
 
-        # 柜列：目标都挂在 y=±1.82 的柜面上
-        for side in (1.0, -1.0):
-            yf = 1.82 * side
-            yb = yf + 0.62 * side
+        # 柜列。位置从 scene.cabinet_rows 读，不写死——柜面 y 与过道 y 之差
+        # 就是观测距离，这个数是标定算例的来源，必须与配置同源。
+        rows = self.world.cabinet_rows or [{"y_m": 1.82, "depth_m": 0.62}]
+        for row in rows:
+            yf = float(row.get("y_m", 1.82))
+            depth = float(row.get("depth_m", 0.62))
+            yb = yf + depth * (1.0 if yf < 0 else -1.0)
             for k, sx in enumerate(range(int(x0) + 1, int(x1), 3)):
                 a, b = float(sx), float(sx) + 2.6
-                shade = 1.0 if (k % 2 == 0) else 0.93     # 柜门交替明暗，看得出分格
+                shade = 1.0 if (k % 2 == 0) else 0.93     # 柜门交替明暗
                 face = tuple(int(c * shade) for c in _CABINET)
                 quad([(a, yf, 0.0), (b, yf, 0.0), (b, yf, 2.0), (a, yf, 2.0)],
                      face, _CABINET_EDGE)
                 quad([(a, yf, 2.0), (b, yf, 2.0), (b, yb, 2.0), (a, yb, 2.0)],
                      tuple(int(c * 0.80) for c in _CABINET), _CABINET_EDGE)
-                # 柜面细节：分格、通风百叶、铭牌、门把手。
-                # 不只是好看——百叶的横线和铭牌边框是检测器与椭圆拟合会遇到的
-                # 真实干扰，桩上没有这些，真机上第一次就会被它们绊倒。
+                # 柜面细节：分格、通风百叶、铭牌、门把手。不只是好看——百叶的
+                # 横线和铭牌边框是检测器与椭圆拟合会遇到的真实干扰。
                 seg((a + 1.3, yf, 0.1), (a + 1.3, yf, 1.9), _CABINET_EDGE)
                 seg((a, yf, 1.55), (b, yf, 1.55), _CABINET_EDGE)
                 seg((a, yf, 0.45), (b, yf, 0.45), _CABINET_EDGE)
-                for lv in range(6):                      # 通风百叶
+                for lv in range(6):
                     zl = 0.60 + lv * 0.045
                     seg((a + 0.25, yf, zl), (a + 1.05, yf, zl),
                         tuple(int(c * 0.72) for c in _CABINET))
@@ -227,10 +229,9 @@ class SceneRenderer:
                         tuple(int(c * 0.72) for c in _CABINET))
                 quad([(a + 0.30, yf, 1.72), (a + 0.95, yf, 1.72),
                       (a + 0.95, yf, 1.86), (a + 0.30, yf, 1.86)],
-                     (206, 204, 198), _CABINET_EDGE)      # 铭牌
+                     (206, 204, 198), _CABINET_EDGE)
                 quad([(a + 1.22, yf, 0.95), (a + 1.38, yf, 0.95),
-                      (a + 1.38, yf, 1.15), (a + 1.22, yf, 1.15)],
-                     (78, 78, 82))                        # 门把手
+                      (a + 1.38, yf, 1.15), (a + 1.22, yf, 1.15)], (78, 78, 82))
 
     # ------------------------------------------------------------ 主流程
     def render(self, *, pose_xy_yaw: tuple[float, float, float],

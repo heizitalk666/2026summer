@@ -175,8 +175,50 @@ def check_timeouts(r: Report) -> None:
 
 
 # ---------------------------------------------------------------- 6
+#: 相对 ICD 附录 D 允许存在的差异，逐条对应差异清单里的决议。
+#: 不在这张表里的差异一律判失败——目的是让偏移**可见**，而不是掩盖它。
+ALLOWED_DRIFT = {
+    "DetectionEvent": [
+        ("properties.detections.items.properties.quality",
+         "A4：四项质量指标，新增可选字段（次版本号 +1）"),
+        ("properties.suspect.properties.trigger_rule.oneOf[1].enum[+QUALITY_LOW]",
+         "A4：新增枚举值（次版本号 +1，需同步附录 B.4）"),
+    ],
+}
+
+
+def _diff_paths(a, b, prefix="") -> list[str]:
+    """列出 b 相对 a 多出／少了／改了的路径。"""
+    out = []
+    if isinstance(a, dict) and isinstance(b, dict):
+        for k in sorted(set(a) | set(b)):
+            pa = f"{prefix}.{k}" if prefix else k
+            if k not in a:
+                out.append(pa)
+            elif k not in b:
+                out.append("-" + pa)
+            else:
+                out.extend(_diff_paths(a[k], b[k], pa))
+    elif isinstance(a, list) and isinstance(b, list):
+        if len(a) == len(b):
+            # 等长时逐位递归。JSON Schema 里 oneOf/allOf 的位置是有意义的，
+            # 整块比对会把"枚举里多了一个值"报成"整个分支被换掉"。
+            for i, (x, y) in enumerate(zip(a, b)):
+                out.extend(_diff_paths(x, y, f"{prefix}[{i}]"))
+        elif a != b:
+            for x in b:
+                if x not in a:
+                    out.append(f"{prefix}[+{x}]")
+            for x in a:
+                if x not in b:
+                    out.append(f"-{prefix}[{x}]")
+    elif a != b:
+        out.append(prefix)
+    return out
+
+
 def check_embedded_copies(r: Report) -> None:
-    print(f"\n{YELLOW}[6] 附录 D 内嵌 Schema 与 schemas/ 下文件一致（语义比对）{RESET}")
+    print(f"\n{YELLOW}[6] schemas/ 相对 ICD 附录 D 的差异必须都在决议清单内{RESET}")
     embedded = {b["title"]: b for b in _icd_json_blocks()
                 if b and "$schema" in b and "title" in b}
     for mt, fn in M.SCHEMA_FILES.items():
@@ -186,7 +228,20 @@ def check_embedded_copies(r: Report) -> None:
         if emb is None:
             r.add(fn, False, f"附录 D 里找不到 title={title}")
             continue
-        r.add(fn, emb == onfile, "语义一致" if emb == onfile else "与附录 D 不一致")
+        # $comment 是给人看的注释，不参与比对
+        diffs = [d for d in _diff_paths(emb, onfile)
+                 if not d.split(".")[-1].startswith("$comment")]
+        allowed = {p for p, _ in ALLOWED_DRIFT.get(title, [])}
+        unexpected = [d for d in diffs if d not in allowed]
+        if not diffs:
+            r.add(fn, True, "与附录 D 一致")
+        elif not unexpected:
+            r.add(fn, True, f"{len(diffs)} 处差异，均在决议清单内")
+            for p_, why in ALLOWED_DRIFT.get(title, []):
+                if p_ in diffs:
+                    print(f"  {DIM}·  {p_}  —  {why}{RESET}")
+        else:
+            r.add(fn, False, "未登记的差异: " + "; ".join(unexpected[:3]))
 
 
 # ---------------------------------------------------------------- 7

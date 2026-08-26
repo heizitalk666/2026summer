@@ -126,6 +126,8 @@ class World:
         self.route_speed = float(sc.get("route", {}).get("speed_mps", 0.5))
         self.route_loop = bool(sc.get("route", {}).get("loop", True))
         self.camera_height_m = float(sc.get("camera_height_m", 1.20))
+        self.cabinet_rows: list[dict] = list(sc.get("cabinet_rows", []))
+        self.aisle_y_m = float(sc.get("aisle_y_m", -3.18))
 
     # ---- 目标查询 ---------------------------------------------------
     def by_id(self, tid: str) -> Target | None:
