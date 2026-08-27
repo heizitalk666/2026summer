@@ -169,46 +169,90 @@ class EvidencePacker:
 
     # ------------------------------------------------------------ 保留策略
     def enforce_retention(self) -> dict:
-        """本地磁盘保留最近 N 天或 M GB，先到先删；已上传的优先删。
+        """本地磁盘保留最近 N 天或 M GB。**只删已确认上传的包。**
 
-        设计原则是**磁盘满不能导致巡检停止**（方案书 §7.3.3）。
+        两条设计原则在这里打架，必须先分清主次：
+
+        - **磁盘满不能导致巡检停止**（方案书 §7.3.3）
+        - **未确认的数据永不自动删除**（方案书 §8.3.5）
+
+        原来的实现只做到了第一条：按时间到期就删，不看 uploaded。结果是
+        一个连传七天没传上去的证据包会被自己删掉——**恰恰是最该留证的那种，
+        因为它没能送到任何别的地方**。现在的规则是：过期或超配额时只删已确认
+        的；只剩未确认的还超配额，就如实报出来交给人处理，不自己动手。
+        巡检本身不会因此停下——打包失败那条路径状态机早就处理了（PACK_FAILED
+        照常转 RESUME）。
+
+        另一个 bug 藏在遍历顺序里：排序是"已上传的优先，其次按时间从旧到新"，
+        而循环遇到第一个"既不过期也不超配额"的包就 break。于是只要队头有一个
+        新的、已上传的包，后面那些真正过期的就永远轮不到——按时间清理静默失效。
+        现在把"要删的"先筛出来再删，不靠 break 提前退出。
         """
         import time
         if not self.root.exists():
-            return {"removed": 0, "freed_mb": 0.0}
-        packs = []
+            return {"removed": 0, "freed_mb": 0.0, "kept_unconfirmed": 0,
+                    "over_quota": False}
+        packs = self._scan_packages()
+        now = time.time()
+        quota = self.max_gb * (1 << 30)
+        total = sum(p["size"] for p in packs)
+
+        confirmed = sorted((p for p in packs if p["uploaded"]),
+                           key=lambda p: p["mtime"])          # 旧的先删
+        unconfirmed = [p for p in packs if not p["uploaded"]]
+
+        removed, freed = 0, 0
+        for p in confirmed:
+            too_old = (now - p["mtime"]) > self.max_days * 86400
+            if not (too_old or total > quota):
+                continue                    # 这个不用删，但后面的可能要——不 break
+            if not self._remove(p["dir"]):
+                continue
+            total -= p["size"]
+            freed += p["size"]
+            removed += 1
+        return {"removed": removed, "freed_mb": round(freed / (1 << 20), 2),
+                "kept_unconfirmed": len(unconfirmed),
+                # 删光了已确认的还超配额，说明剩下的全是没传上去的。
+                # 这时候**不删**，报出来让人来看。
+                "over_quota": total > quota}
+
+    def _scan_packages(self) -> list[dict]:
+        out = []
         for run_dir in self.root.iterdir():
             if not run_dir.is_dir():
                 continue
             for ev in run_dir.iterdir():
                 if not ev.is_dir():
                     continue
-                mf = ev / "manifest.json"
-                size = sum(p.stat().st_size for p in ev.rglob("*") if p.is_file())
-                uploaded = False
-                if mf.exists():
-                    try:
-                        m = json.loads(mf.read_text(encoding="utf-8"))
-                        uploaded = all(f.get("uploaded") for f in m.get("files", []))
-                    except (OSError, ValueError):
-                        pass
-                packs.append({"dir": ev, "mtime": ev.stat().st_mtime,
-                              "size": size, "uploaded": uploaded})
-        now = time.time()
-        total = sum(p["size"] for p in packs)
-        # 已上传的优先删，其次按时间从旧到新
-        packs.sort(key=lambda p: (not p["uploaded"], p["mtime"]))
-        removed, freed = 0, 0
-        for p in packs:
-            too_old = (now - p["mtime"]) > self.max_days * 86400
-            too_big = total > self.max_gb * (1 << 30)
-            if not (too_old or too_big):
-                break
-            shutil.rmtree(p["dir"], ignore_errors=True)
-            total -= p["size"]
-            freed += p["size"]
-            removed += 1
-        return {"removed": removed, "freed_mb": round(freed / (1 << 20), 2)}
+                try:
+                    size = sum(p.stat().st_size for p in ev.rglob("*") if p.is_file())
+                    mtime = ev.stat().st_mtime
+                except OSError:
+                    continue
+                out.append({"dir": ev, "mtime": mtime, "size": size,
+                            "uploaded": self._all_uploaded(ev / "manifest.json")})
+        return out
+
+    @staticmethod
+    def _all_uploaded(manifest_path: Path) -> bool:
+        """没有 manifest、读不动、或者还有文件没确认，一律算**未确认**。
+
+        判错方向的代价不对称：错判成已确认会把没送出去的证据删掉，
+        错判成未确认只是多占一点盘。
+        """
+        try:
+            m = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        files = m.get("files", [])
+        return bool(files) and all(f.get("uploaded") for f in files)
+
+    @staticmethod
+    def _remove(d: Path) -> bool:
+        """删一个包目录。真删掉了才返回 True——统计数字不能虚报。"""
+        shutil.rmtree(d, ignore_errors=True)
+        return not d.exists()
 
 
 def _empty_snapshot() -> dict:

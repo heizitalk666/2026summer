@@ -60,7 +60,8 @@ class PTZSerial(IPTZ):
 
         self._lock = threading.RLock()
         self._seq = 0
-        self._jobs: dict[str, tuple[int, str, int]] = {}   # handle -> (seq, kind, t0)
+        # handle -> (seq, kind, t0_ns, target)；target 是 (pan, tilt, zoom) 或 None
+        self._jobs: dict[str, tuple[int, str, int, tuple | None]] = {}
         self._done: dict[str, ExecResult] = {}
         self._pose: dict | None = None
         self._pose_ns = 0
@@ -75,11 +76,12 @@ class PTZSerial(IPTZ):
             self._seq = (self._seq + 1) & 0xFFFF
             return self._seq
 
-    def _send(self, kind: str, ftype: str, *payload) -> ExecHandle:
+    def _send(self, kind: str, ftype: str, *payload,
+              target: tuple | None = None) -> ExecHandle:
         seq = self._next_seq()
         h = ExecHandle("ptz-%s-%04x" % (kind.lower(), seq), mono_ns())
         with self._lock:
-            self._jobs[h.handle_id] = (seq, kind, h.issued_ts_mono_ns)
+            self._jobs[h.handle_id] = (seq, kind, h.issued_ts_mono_ns, target)
         self.link.write(P.encode(ftype, seq, *payload))
         return h
 
@@ -126,7 +128,8 @@ class PTZSerial(IPTZ):
         return self._send("SET_POSE", CMD_SET,
                           int(round(pan_deg * 1000)), int(round(tilt_deg * 1000)),
                           int(round(zoom * 100)),
-                          "S" if speed is PTZSpeed.SLOW else "N")
+                          "S" if speed is PTZSpeed.SLOW else "N",
+                          target=(float(pan_deg), float(tilt_deg), float(zoom)))
 
     def set_rate(self, pan_dps: float, tilt_dps: float, ttl_ms: int) -> ExecHandle:
         if self._caps.max_pan_dps <= 0.0:
@@ -138,7 +141,7 @@ class PTZSerial(IPTZ):
                           int(round(t * 1000)), int(ttl_ms))
 
     def home(self) -> ExecHandle:
-        return self._send("HOME", CMD_HOME)
+        return self._send("HOME", CMD_HOME, target=(0.0, 0.0, 1.0))
 
     def status(self) -> PTZStatus:
         with self._lock:
@@ -163,7 +166,7 @@ class PTZSerial(IPTZ):
             pose = self._pose
         if job is None:
             return ExecResult(ExecProgress.FAILED, 0, "未知句柄")
-        seq, kind, t0 = job
+        seq, kind, t0, target = job
         ms = int((mono_ns() - t0) // 1_000_000)
         if pose is None:
             return ExecResult(ExecProgress.IN_PROGRESS, ms, None)
@@ -171,10 +174,28 @@ class PTZSerial(IPTZ):
             return ExecResult(ExecProgress.DONE, ms, None)
         if pose["focus"] is FocusState.FAILED:
             return ExecResult(ExecProgress.FAILED, ms, "FOCUS_FAILED")
+        # **不能只看 at_target。**刚发出 set_pose 的那一瞬间，云台还没开始动，
+        # 位姿帧报的仍是上一个目标的"已到位"——照单全收会让这条指令一发出去
+        # 就被判成完成，exec 进度全是假的，后面等它的人白等。
+        # 判据改成"报回来的位姿确实落在本条指令的目标上"，与 at_target 无关，
+        # 因此不受报文时序影响。
+        if target is not None and not self._pose_matches(pose, target):
+            return ExecResult(ExecProgress.IN_PROGRESS, ms, None)
         if pose["at_target"] and not pose["moving"] \
                 and pose["focus"] is FocusState.LOCKED:
             return ExecResult(ExecProgress.DONE, ms, None)
         return ExecResult(ExecProgress.IN_PROGRESS, ms, None)
+
+    #: 位姿到位判据。云台有到位抖动（桩里是 0.15°），判太严会永远不"到位"。
+    POSE_TOL_DEG = 0.5
+    ZOOM_TOL = 0.05
+
+    @classmethod
+    def _pose_matches(cls, pose: dict, target: tuple) -> bool:
+        pan, tilt, zoom = target
+        return (abs(pose["pan_deg"] - pan) <= cls.POSE_TOL_DEG
+                and abs(pose["tilt_deg"] - tilt) <= cls.POSE_TOL_DEG
+                and abs(pose["zoom"] - zoom) <= cls.ZOOM_TOL)
 
     def close(self) -> None:
         self._stop.set()

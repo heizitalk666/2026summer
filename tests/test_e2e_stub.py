@@ -20,7 +20,10 @@ INCONCLUSIVE 证据包。
 - 走完 CRUISE → SUSPECT → HALT_REQ → AIM → ZOOM → CAPTURE → VERIFY → PACK
 - 伺服在 AIM 期间**采到过反馈样本**（samples > 0）。采不到说明目标不在画面里，
   只能干等超时——这正是修复前的症状
-- 证据包 gain.pixel_density_ratio ≥ 2.0（1× 的约 50 px → 2.1× 之后的约 120 px）
+- 证据包 after.pixel_density_px 达到判据线 120 px（或已经顶到最大倍率）。
+  **判据不能写成"倍率比 ≥ 2.4"**——需要的倍率由 before 的密度反解而来
+  （z = clip(120 / p_before, 1, 3)），先触发的是哪块表、车停在哪一步，
+  before 就不一样，倍率比自然跟着变。钉死一个倍率是在钉一次运行的巧合
 - gain.delta_conf > 0 且 verify_success = true
 - before.est_distance_m ≥ 5.0。过道 y=−3.18、柜面 y=+1.82，任何表计都不可能
   近于 5.00 m。**这一条是用来反证触发源是真表计而不是合成误检的**——修复前
@@ -155,8 +158,16 @@ def test_end_to_end_verify_cycle(free_ports, tmp_path):
         % rig.aim_samples)
 
     g, before, after = good["gain"], good["before"], good["after"]
-    # 复核的全部意义：像素密度上去了，置信度跟着上去
-    assert g["pixel_density_ratio"] >= 2.0, good
+    # 复核的全部意义：像素密度提到判据线以上，置信度跟着上去。
+    # 需要多大倍率是 before 决定的（z = clip(p_target / p_before, 1, max_zoom)），
+    # 所以这里钉的是**结果达标**，不是某个固定倍率。
+    p_min = float(rig.cfg.get("perception.quality.pixel_density_target", 120.0))
+    max_zoom = float(rig.cfg.get("optics.max_zoom", 3.0))
+    assert g["pixel_density_ratio"] > 1.5, good
+    assert (after["pixel_density_px"] >= 0.90 * p_min
+            or after["zoom"] >= 0.99 * max_zoom), (
+        "复核后只有 %.1f px，既没到判据线 %.0f px 也没顶到最大倍率 %.1f×"
+        % (after["pixel_density_px"], p_min, max_zoom))
     assert g["delta_conf"] > 0.0, good
     assert after["zoom"] > before["zoom"], good
     assert good.get("abort") is None, good

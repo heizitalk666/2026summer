@@ -19,3 +19,5 @@ training/runs/
 *.rknn
 cloud/patrol.db-wal
 cloud/patrol.db-shm
+.coverage
+htmlcov/

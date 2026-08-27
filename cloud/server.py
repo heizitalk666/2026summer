@@ -62,19 +62,40 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         return {"ok": True, "event_id": manifest["event_id"],
                 "files_expected": len(manifest.get("files", []))}
 
+    #: 单个证据文件的上限。cruise_clip.mp4 通常几百 KB，留足余量即可。
+    #: 没有上限的话一个坏客户端就能把云端的内存吃光（req.body() 是全量读进来的）。
+    max_file_bytes = int(cfg.get("cloud.max_file_bytes", 64 * 1024 * 1024))
+
+    def safe_path(*parts: str) -> Path:
+        """把 URL 里来的路径片段拼进 storage，并**确认没有跑出去**。
+
+        `storage / run_id / event_id / name` 这种写法，只要哪一段是 `..`
+        就能读写 storage 之外的任意文件。原来只校验了 name 一段，run_id 与
+        event_id 完全没查——而它们同样来自 URL。这里统一 resolve 之后比较
+        前缀，比逐段过滤黑名单可靠（`%2e%2e`、`.%2e` 之类的变体绕不过去）。
+        """
+        for x in parts:
+            if not x or x in (".", "..") or "/" in x or "\\" in x or "\x00" in x:
+                raise HTTPException(400, "非法路径片段: %r" % x)
+        root = storage.resolve()
+        p = (root.joinpath(*parts)).resolve()
+        if p != root and root not in p.parents:
+            raise HTTPException(400, "路径越界")
+        return p
+
     @app.put("/api/evidence/{run_id}/{event_id}/files/{name}")
     async def put_file(run_id: str, event_id: str, name: str, req: Request):
-        if "/" in name or ".." in name:
-            raise HTTPException(400, "非法文件名")
+        target = safe_path(run_id, event_id, name)
         data = await req.body()
+        if len(data) > max_file_bytes:
+            raise HTTPException(413, "文件超过 %d 字节上限" % max_file_bytes)
         want = req.headers.get("X-Sha256")
         got = hashlib.sha256(data).hexdigest()
         if want and want != got:
             # 哈希不一致说明传输出错，拒收让边缘侧重传
             raise HTTPException(409, "sha256 不一致: 期望 %s 实得 %s" % (want, got))
-        d = storage / run_id / event_id
-        d.mkdir(parents=True, exist_ok=True)
-        (d / name).write_bytes(data)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
         ledger.record_asset(event_id, name, got, len(data), int(time.time() * 1000))
         return {"ok": True, "bytes": len(data), "sha256": got}
 
@@ -83,7 +104,8 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     def list_evidence(run_id: str | None = None, needs_review: bool | None = None,
                       verdict: str | None = None, limit: int = 200):
         return ledger.list_evidence(run_id=run_id, needs_review=needs_review,
-                                    verdict=verdict, limit=limit)
+                                    verdict=verdict,
+                                    limit=max(1, min(int(limit), 2000)))
 
     @app.get("/api/evidence/{event_id}")
     def get_evidence(event_id: str):
@@ -102,8 +124,8 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     @app.get("/api/files/{run_id}/{event_id}/{name}")
     def get_file(run_id: str, event_id: str, name: str):
-        p = storage / run_id / event_id / name
-        if not p.exists():
+        p = safe_path(run_id, event_id, name)      # 这里原来一段都没校验
+        if not p.is_file():
             raise HTTPException(404, "文件不存在")
         return FileResponse(p)
 

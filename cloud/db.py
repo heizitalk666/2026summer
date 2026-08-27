@@ -112,6 +112,13 @@ class Ledger:
         with self._conn() as c:
             c.execute("""INSERT INTO evidence VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                          ON CONFLICT(event_id) DO UPDATE SET
+                           -- 补传/更正时这几个也要跟着更新。原来漏了
+                           -- waypoint_id 与 ts_utc_ms，重传一份改正过的
+                           -- manifest 之后台账里还留着旧的巡检位。
+                           site_id=excluded.site_id,
+                           waypoint_id=excluded.waypoint_id,
+                           ts_utc_ms=excluded.ts_utc_ms,
+                           model_version=excluded.model_version,
                            verdict=excluded.verdict, defect_class=excluded.defect_class,
                            severity=excluded.severity, needs_review=excluded.needs_review,
                            confidence=excluded.confidence, delta_conf=excluded.delta_conf,

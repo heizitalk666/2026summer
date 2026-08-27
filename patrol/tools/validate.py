@@ -142,17 +142,25 @@ def check_budget(r: Report) -> None:
     n = math.floor((T_max - L_m / v) / T_r)
     r.add("ICD §7.4 N_max = 22", n == 22, f"{n}")
 
-    # 当前配置的实际值（可能因 A3/C4 的开关而不同，这里只报告不判错）
-    try:
-        from patrol.common.config import Config
-        cfg = Config.load()
-        cb = cfg.get("mission.fsm.budget_s")
-        T_cfg = sum(cb.values())
-        n_cfg = math.floor((T_max - L_m / v) / T_cfg)
-        print(f"  {DIM}·  当前配置 T_r = {T_cfg:.1f} s，N_max = {n_cfg}"
-              f"（A3/C4 开关生效后的实际值）{RESET}")
-    except Exception:
-        pass
+    # 当前配置的实际值。**这里必须读配置，不能沿用上面 ICD 算例的 L/v/T_max。**
+    # 实车最高只有 0.3 m/s（底盘固件 MAX_SPD 0.1 × 三档，见 docs/底盘固件评审.md），
+    # 而原来这一段把算例的 0.5 m/s 也套在配置上，于是"200 m 路线在本车上根本
+    # 跑不完"这件事被算例的数字盖住了，一直没人发现。
+    from patrol.common.config import Config
+    cfg = Config.load()
+    T_cfg = sum(cfg.get("mission.fsm.budget_s").values())
+    bud = cfg.get("mission.budget")
+    L_cfg = float(bud["route_length_m"])
+    v_cfg = float(bud["cruise_speed_mps"])
+    T_max_cfg = float(bud["max_run_seconds"])
+    cruise_s = L_cfg / max(1e-6, v_cfg)
+    n_cfg = math.floor((T_max_cfg - cruise_s) / T_cfg)
+    r.add("当前配置 N_max > 0（路线跑得完且排得下复核）", n_cfg > 0,
+          f"L={L_cfg:.0f} m, v={v_cfg:.2f} m/s → 巡航 {cruise_s:.0f} s / {T_max_cfg:.0f} s，"
+          f"T_r={T_cfg:.1f} s，N_max={n_cfg}")
+    if n_cfg <= 0:
+        print(f"  {DIM}·  光巡航就要 {cruise_s:.0f} s，超过单轮上限 {T_max_cfg:.0f} s，"
+              f"一次复核都排不下。缩短路线、放宽 T_max 或提高车速三选一{RESET}")
 
 
 # ---------------------------------------------------------------- 5

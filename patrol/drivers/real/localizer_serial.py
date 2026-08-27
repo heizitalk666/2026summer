@@ -7,8 +7,11 @@
 
 **这会不会太弱？**对本课题够用，且边界写清楚了：
 
-- `cov_trace` 直接取底盘上报的定位质量。底盘只报 `progress` 时退化为按
-  路线插值，此时 `source = ODOM_ONLY`、`valid = False`，触发 ICD §7.3 的
+- **`source` 恒为 `ODOM_ONLY`。**车上没有激光雷达，位置是拿底盘上报的
+  `path_progress` 沿标定路线插出来的，属于航位推算。报 `LIDAR_SLAM` 是撒谎，
+  而这个字段会原样进证据包——将来查一次定位偏差时，它是判断"该信多少"的
+  唯一依据。等真上了 SLAM 模块再改这里。
+- `valid` 取底盘健康状态。`FAULT` / `ESTOP` 时置 false，触发 ICD §7.3 的
   `POSE_INVALID` 抑制——**宁可不复核，也不在漂移的坐标系里下发 GOTO_OBSERVE**。
 - 若后续换成独立的激光 SLAM 模块（另一条串口或 ROS 话题），只改本文件，
   ILocalizer 的四个方法语义不变。
@@ -34,10 +37,14 @@ class LocalizerSerial(ILocalizer):
         self._rate = float(c.get("rate_hz", 20.0))
         self._cov_ok = float(c.get("cov_trace_nominal", 0.014))
         self._cov_odom = float(c.get("cov_trace_odom", 0.35))
-        # 路线几何：真机模式不加载 scene，只用巡检位标定表插值
+        # 路线几何。**真机模式不许读 scene.\***——那是虚拟配电室的配置，
+        # 只在 stub 模式存在。原来这里写的是 cfg.get("scene.route.points")，
+        # 而 system.yaml 无条件 include 了 scene.yaml，于是真机跑起来会拿
+        # 虚拟场景的巡检顺序去插值真车的位置，错得毫无征兆。
         self._wps = [(w["id"], float(w["x_m"]), float(w["y_m"]))
                      for w in cfg.get("waypoints")]
-        self._route = list(cfg.get("scene.route.points", [])) or [w[0] for w in self._wps]
+        self._route = (list(c.get("route_points", []))
+                       or [w[0] for w in self._wps])   # 缺省按标定表顺序
         self._by_id = {w[0]: (w[1], w[2]) for w in self._wps}
 
         self._lock = threading.RLock()
@@ -88,7 +95,8 @@ class LocalizerSerial(ILocalizer):
             p = Pose(x_m=round(x, 4), y_m=round(y, 4), yaw_deg=round(yaw, 4),
                      cov_trace=self._cov_ok if valid else self._cov_odom,
                      valid=valid,
-                     source=PoseSource.ODOM_ONLY if not valid else PoseSource.LIDAR_SLAM,
+                     # 车上没有激光雷达，这就是航位推算。见模块文档。
+                     source=PoseSource.ODOM_ONLY,
                      ts_mono_ns=mono_ns())
             with self._lock:
                 self._pose = p

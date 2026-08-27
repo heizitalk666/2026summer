@@ -130,9 +130,19 @@ mission:
     waypoint_radius_m: 2.0
     resume_silence_s: 3.0
   # 复核预算（ICD §7.4）。T_r 由 fsm.budget_s 实时加总，不写死 8.8 s
+  #
+  # **这三个数按实车重新标过，不是任务书上的标称值。**
+  # 读了底盘固件（XiaoChe_APM32）之后才知道：MAX_SPD 0.1 m/s × 三档，
+  # 最高 0.3 m/s。按任务书的 200 m 路线算，光巡航就要 667 s，已经超过
+  # 600 s 的单轮上限——N_max = 0，一次复核都排不下。详见
+  # docs/底盘固件评审.md §6，那里列了三条出路。
+  #
+  # 这里取"缩短路线"这一条：60 m / 0.25 m/s（中档，留余量）→ 巡航 240 s，
+  # N_max = 39，余量充足。**这是待 D3 评审确认的设计变更**，不是既成事实；
+  # validate.py 第 4 项现在会在 N_max ≤ 0 时直接判失败，改回 200 m 会立刻红。
   budget:
-    route_length_m: 200.0
-    cruise_speed_mps: 0.5
+    route_length_m: 60.0
+    cruise_speed_mps: 0.25
     max_run_seconds: 600.0
   # === A2：首版缺陷类别 ===
   # 差异清单推荐：以方案书为准，渗漏油换成开关分合位（公开数据可得性）
