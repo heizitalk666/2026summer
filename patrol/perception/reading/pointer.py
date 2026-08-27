@@ -170,7 +170,8 @@ REFINE_WIN_DEG = 6.0   # 细化窗半宽，度
 
 
 def _needle_angle(gray_rect: np.ndarray, center: tuple[float, float],
-                  radius: float) -> tuple[float, float, tuple[float, float]] | None:
+                  radius: float, prob_rect: np.ndarray | None = None
+                  ) -> tuple[float, float, tuple[float, float]] | None:
     """在校正后的正圆表盘上找指针。返回 (角度, 置信度, 尖端坐标)。
 
     做法是**极坐标展开 + 径向覆盖率扫描**：
@@ -190,6 +191,15 @@ def _needle_angle(gray_rect: np.ndarray, center: tuple[float, float],
        软斜坡让指针边缘的部分覆盖如实反映出来，质心才是无偏的。
 
     角度自 12 点方向顺时针为正，与 scene/gauges 的约定一致。
+
+    `prob_rect` 是分割模型给的"这个像素是不是针"概率图（已校正到正圆），
+    给了就用它代替上面那套"暗度 + Otsu"的覆盖率——**后面的极坐标展开、
+    逐环角质心、180° 歧义消解全都照旧复用**。
+
+    这是级联，不是二选一：分割替换掉的只是"哪些像素是针"这一步，也就是
+    几何法里假设最强、最先失效的那一步（它假设针是盘面上最暗的贯穿条）。
+    亚度级精度那部分是几何算出来的，不是学出来的——学习模型给不出
+    0.25° 的角分辨率，而那正是 0.5 % FS 精度所依赖的。
     """
     cx, cy = center
     H, W = gray_rect.shape[:2]
@@ -198,21 +208,30 @@ def _needle_angle(gray_rect: np.ndarray, center: tuple[float, float],
     r_out = float(BAND_HI) * radius
     if r_out < 6.0:
         return None
-    # 极坐标展开：行 = 角度（自 +x 轴起，图像 y 向下故视觉上顺时针），列 = 半径
-    polar = cv2.warpPolar(g, (N_RADIUS, N_THETA), (float(cx), float(cy)),
-                          r_out, cv2.WARP_POLAR_LINEAR + cv2.INTER_LINEAR)
     c_lo = int(round(N_RADIUS * BAND_LO / BAND_HI))
-    band = polar[:, c_lo:].astype(np.float32)
-    if band.size < 64:
-        return None
 
-    # 环内 Otsu 定阈值：表盘内部暗像素通常不到面积的 10 %，取固定分位会落在
-    # 接近白面的值上，把抗锯齿晕圈整片吞进来。
-    thr, _ = cv2.threshold(band.astype(np.uint8).reshape(-1, 1), 0, 255,
-                           cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    thr = float(thr)
-    soft = np.clip((thr - band) / max(1e-6, 0.35 * thr), 0.0, 1.0)
-    cover = soft.mean(axis=1)                      # 每个角度的暗覆盖率
+    if prob_rect is not None:
+        # 分割模型给了概率图：直接展开成极坐标，它本身就是"覆盖率"
+        pol = cv2.warpPolar(prob_rect.astype(np.float32),
+                            (N_RADIUS, N_THETA), (float(cx), float(cy)),
+                            r_out, cv2.WARP_POLAR_LINEAR + cv2.INTER_LINEAR)
+        soft = np.clip(pol[:, c_lo:], 0.0, 1.0)
+        if soft.size < 64:
+            return None
+    else:
+        # 极坐标展开：行 = 角度（自 +x 轴起，图像 y 向下故视觉上顺时针），列 = 半径
+        polar = cv2.warpPolar(g, (N_RADIUS, N_THETA), (float(cx), float(cy)),
+                              r_out, cv2.WARP_POLAR_LINEAR + cv2.INTER_LINEAR)
+        band = polar[:, c_lo:].astype(np.float32)
+        if band.size < 64:
+            return None
+        # 环内 Otsu 定阈值：表盘内部暗像素通常不到面积的 10 %，取固定分位会落在
+        # 接近白面的值上，把抗锯齿晕圈整片吞进来。
+        thr, _ = cv2.threshold(band.astype(np.uint8).reshape(-1, 1), 0, 255,
+                               cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        thr = float(thr)
+        soft = np.clip((thr - band) / max(1e-6, 0.35 * thr), 0.0, 1.0)
+    cover = soft.mean(axis=1)                      # 每个角度的覆盖率
 
     # 角度是环量，平滑时要环绕
     k = np.ones(5, np.float32) / 5.0
@@ -259,11 +278,16 @@ def _needle_angle(gray_rect: np.ndarray, center: tuple[float, float],
 
 
 def read_pointer_gauge(img: np.ndarray, bbox, priors: dict,
-                       *, want_debug: bool = False) -> PointerReading:
+                       *, want_debug: bool = False,
+                       segmenter=None) -> PointerReading:
     """从图像与检测框解算一块指针表的读数。
 
     priors 是标定阶段录入的先验（量程、扫过角、零位偏置、正常区间），
     **不含当前读数**。
+
+    `segmenter` 给了就走"分割 → 几何"的级联（见 _needle_angle 的说明）；
+    分割没给出可用掩膜时**自动退回纯几何**，不报错——学习模型缺席应当让
+    读数退回到今天这个水平，而不是让读数失败。
     """
     prep = _prep(img, bbox)
     if prep is None:
@@ -290,7 +314,25 @@ def read_pointer_gauge(img: np.ndarray, bbox, priors: dict,
     gray_rect = cv2.cvtColor(rect, cv2.COLOR_BGR2GRAY) if rect.ndim == 3 else rect
     (cx, cy) = ellipse[0]
 
-    res = _needle_angle(gray_rect, (cx, cy), radius)
+    prob_rect = None
+    seg_used = False
+    if segmenter is not None:
+        try:
+            gm = segmenter.segment(patch)
+        except Exception:                                      # noqa: BLE001
+            gm = None
+        if gm is not None and gm.ok:
+            # 掩膜要和图像走同一次仿射校正，否则针的概率会落在错误的角度上
+            prob_rect = cv2.warpAffine(
+                gm.needle, Maff, (rect.shape[1], rect.shape[0]),
+                flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT,
+                borderValue=0.0)
+            seg_used = True
+
+    res = _needle_angle(gray_rect, (cx, cy), radius, prob_rect)
+    if res is None and seg_used:
+        res = _needle_angle(gray_rect, (cx, cy), radius)       # 退回纯几何
+        seg_used = False
     if res is None:
         return PointerReading(False, axis_ratio=axis_ratio, glare_ratio=glare,
                               fail_reason="未提取到指针")
@@ -316,7 +358,7 @@ def read_pointer_gauge(img: np.ndarray, bbox, priors: dict,
     if want_debug:
         dbg = {"patch": patch, "rect": rect, "ellipse": ellipse,
                "radius": radius, "center_work": (cx, cy), "tip_work": tip,
-               "scale": scale}
+               "scale": scale, "seg_used": seg_used, "prob_rect": prob_rect}
     return PointerReading(
         ok=True, angle_deg=round(float(ang), 4), value=round(float(value), 6),
         confidence=round(float(conf), 4), axis_ratio=round(float(axis_ratio), 4),

@@ -56,6 +56,21 @@ perception:
       occlusion: 0.10
     threshold: 0.75         # Q < 0.75 触发主动测量（方案书 §6.4）
     pixel_density_target: 120.0   # 由 0.5 % FS 精度反推（方案书 §5.3.2）
+  # === L2 分割。读数的第二种实现路线，与几何法接同一个接口 ===
+  #
+  # 默认 builtin —— 不加载任何权重，读数走 reading/pointer.py 的几何法。
+  # 这是**用数据定下来的默认**，不是偷懒：tools/bench_models.py 实测，
+  # 在本项目的合成表盘上级联并不比几何法更准（0.11 vs 0.05 %FS），
+  # 而且慢 2.4 倍（5.5 ms vs 2.4 ms）。
+  #
+  # 学习法的价值在几何法的假设不成立时——方形表、指针与背景同色、玻璃反光
+  # 盖住半个盘面。那类样本我们现在还没有，所以先不开。等真机数据到了，
+  # 用 bench_models 重新比一次再决定。
+  segmenter:
+    backend: builtin        # builtin | npz | onnx
+    weights: training/runs/seg/pixel.npz
+    min_side_px: 40         # ROI 短边小于此不跑：逐像素分类没有意义
+    input_size: 256         # 仅 onnx 后端用
   # === 第二条读数通路：OCR。读表面印着的量程/单位/位置牌，与标定先验对质 ===
   #
   # 它抓的是几何法**原理上抓不到**的一类错误：指针角度量得再准，量程错了

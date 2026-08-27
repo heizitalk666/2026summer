@@ -38,6 +38,7 @@ from patrol.perception.detector.synthetic import CLASS_SIZE_M
 from patrol.perception.fusion import Evidence, fuse
 from patrol.perception.ocr.base import build_ocr
 from patrol.perception.quality import evaluate as eval_quality
+from patrol.perception.segment.base import build_segmenter
 from patrol.perception.reading.indicator import read_indicator_light
 from patrol.perception.reading.pointer import read_pointer_gauge, reading_to_l2
 from patrol.perception.reading.nameplate import (cross_check_dial,
@@ -104,6 +105,15 @@ class PerceptionNode:
         # 第四个模型：OCR。它只在复核期跑（见 ocr/rapid.py 的耗时说明），
         # 装不上时 build_ocr 返回 DisabledOcr，互证通路降级但链路不断。
         self.ocr = build_ocr(cfg)
+        # 分割：读数的第二种实现。默认 builtin（=None），读数走几何法——
+        # 这是 bench_models 实测定下来的默认，见 configs/system.yaml 的说明。
+        try:
+            self.segmenter = build_segmenter(cfg)
+        except (FileNotFoundError, ValueError) as e:
+            self.log.warn("分割模型不可用，读数退回几何法", detail=str(e))
+            self.segmenter = None
+        if self.segmenter is not None:
+            self.log.info("分割级联已启用", **self.segmenter.model_info())
         if not self.ocr.available:
             self.log.warn("OCR 互证通路未启用",
                           detail=str(self.ocr.model_info().get("reason", "")))
@@ -217,7 +227,8 @@ class PerceptionNode:
         if kind is None or priors is None:
             return None
         if kind == "POINTER_GAUGE":
-            r = read_pointer_gauge(image, det.bbox, priors)
+            r = read_pointer_gauge(image, det.bbox, priors,
+                                   segmenter=self.segmenter)
             l2 = reading_to_l2(r, priors)
             l2["roi"] = [float(max(0.0, v)) for v in det.bbox]
             return l2

@@ -130,12 +130,33 @@ class SceneRenderer:
         if edge is not None:
             cv2.polylines(img, [pts], True, edge, 1, cv2.LINE_AA)
 
+    def _label_texture(self, t, size: int) -> np.ndarray:
+        """目标的分割标签贴图。只有指针表分到三类，其余整块算一类。
+
+        指示灯与开关把手不做像素级细分：它们的读数靠颜色和朝向，
+        不靠亚像素的边界——为它们标掩膜是白花力气。
+        """
+        p = t.priors
+        if str(p.get("kind") or "") == "POINTER_GAUGE":
+            return gauges.render_pointer_gauge_mask(
+                size, value=float(t.true_value), range_min=float(p["range_min"]),
+                range_max=float(p["range_max"]), sweep_deg=float(p["sweep_deg"]),
+                zero_offset_deg=float(p["zero_offset_deg"]),
+                major_ticks=int(p["major_ticks"]))
+        return np.full((size, size), gauges.SEG_LABELS["face"], np.uint8)
+
     @staticmethod
-    def _warp_texture(img: np.ndarray, uv: np.ndarray, tex: np.ndarray) -> None:
+    def _warp_texture(img: np.ndarray, uv: np.ndarray, tex: np.ndarray,
+                      *, label: bool = False) -> None:
         """把正方形贴图透视映射到四边形 uv（左上/右上/右下/左下）。
 
         用 warpPerspective 而不是简单缩放，这样相机斜看表盘时图上是**椭圆**，
         读数算法必须真的做透视校正（方案书 §6.1.4），不能假设正圆。
+
+        `label=True` 时贴的是分割标签而不是颜色：**必须用最近邻插值、必须
+        硬边**。线性插值会在"针"和"面"的交界处插出 1.5 这种不存在的类别，
+        抗锯齿边缘同理——训练时这些像素会变成成片的错标，而且分布在最关键的
+        位置（针的边缘正是决定角度的地方）。
         """
         h, w = tex.shape[:2]
         src = np.float32([[0, 0], [w - 1, 0], [w - 1, h - 1], [0, h - 1]])
@@ -154,12 +175,19 @@ class SceneRenderer:
             return
         # 只在包围盒内做变换，整幅 warp 太慢
         T = np.array([[1, 0, -x0], [0, 1, -y0], [0, 0, 1]], np.float64)
-        patch = cv2.warpPerspective(tex, T @ M, (x1 - x0, y1 - y0),
-                                    flags=cv2.INTER_LINEAR,
-                                    borderMode=cv2.BORDER_TRANSPARENT,
-                                    dst=img[y0:y1, x0:x1].copy())
+        patch = cv2.warpPerspective(
+            tex, T @ M, (x1 - x0, y1 - y0),
+            flags=cv2.INTER_NEAREST if label else cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_TRANSPARENT,
+            dst=img[y0:y1, x0:x1].copy())
         mask = np.zeros((y1 - y0, x1 - x0), np.uint8)
-        cv2.fillConvexPoly(mask, (np.round(dst).astype(np.int32) - [x0, y0]), 255, cv2.LINE_AA)
+        cv2.fillConvexPoly(mask, (np.round(dst).astype(np.int32) - [x0, y0]), 255,
+                           cv2.LINE_8 if label else cv2.LINE_AA)
+        if label:
+            sel = mask > 0
+            roi = img[y0:y1, x0:x1]
+            roi[sel] = patch[sel]
+            return
         m3 = (mask[..., None].astype(np.float32) / 255.0)
         roi = img[y0:y1, x0:x1].astype(np.float32)
         img[y0:y1, x0:x1] = np.clip(patch.astype(np.float32) * m3 + roi * (1 - m3),
@@ -236,12 +264,20 @@ class SceneRenderer:
     # ------------------------------------------------------------ 主流程
     def render(self, *, pose_xy_yaw: tuple[float, float, float],
                pan_deg: float, tilt_deg: float, zoom: float,
-               speed_mps: float | None = None,
-               ) -> tuple[np.ndarray, list[dict]]:
+               speed_mps: float | None = None, want_mask: bool = False,
+               ) -> tuple:
         """渲染一帧。
 
         返回 (图像, 目标元数据列表)。元数据里含 bbox、距离、像素密度等，
         **只给桩内部与测试用**，感知节点拿不到（camera 驱动只返回 Frame）。
+
+        `want_mask=True` 时多返回一张分割标签图，用同一套 uv、同一次透视
+        变换生成——**这是合成数据集的立足点**。像素级标注在真实场景里是最贵
+        的一种（一块表盘要人描十几分钟），在这里它是渲染的免费副产品，而且
+        天生与图像逐像素对齐，不需要任何配准。
+
+        掩膜里不做 4K 裁剪的降采样与后处理（模糊、噪声、光照）：那些是
+        **成像**的失真，标签不该跟着失真。
         """
         o = self.o
         x, y, yaw = pose_xy_yaw
@@ -263,6 +299,8 @@ class SceneRenderer:
         vis = self.world.visible(cam, margin_px=max(40.0, rw * 0.05))
         vis.sort(key=lambda tv: -self.world.distance_to(tv[0], cam.origin))
 
+        # 标签画布与渲染分辨率同尺寸，最后与图像一起缩放到输出分辨率
+        lab = np.zeros((rh, rw), np.uint8) if want_mask else None
         meta: list[dict] = []
         for t, uv in vis:
             d = self.world.distance_to(t, cam.origin)
@@ -274,6 +312,9 @@ class SceneRenderer:
             if glare > 1e-3 and str(t.priors.get("kind")) == "POINTER_GAUGE":
                 tex = gauges.add_glass_glare(tex, strength=glare, rng=self.rng)
             self._warp_texture(img, uv, tex)
+            if lab is not None:
+                self._warp_texture(lab, uv, self._label_texture(t, tex.shape[0]),
+                                   label=True)
 
             x1, y1 = float(uv[:, 0].min()), float(uv[:, 1].min())
             x2, y2 = float(uv[:, 0].max()), float(uv[:, 1].max())
@@ -298,6 +339,11 @@ class SceneRenderer:
 
         if o.draw_debug:
             self._annotate(img, meta, z)
+        if lab is not None:
+            if (lab.shape[1], lab.shape[0]) != (o.width, o.height):
+                lab = cv2.resize(lab, (o.width, o.height),
+                                 interpolation=cv2.INTER_NEAREST)
+            return img, meta, lab
         return img, meta
 
     # ------------------------------------------------------------ 后处理

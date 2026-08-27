@@ -47,6 +47,67 @@ def _polar(cx: float, cy: float, r: float, angle_cw_from_up_deg: float
     return int(round(cx + r * math.cos(a))), int(round(cy + r * math.sin(a)))
 
 
+# ------------------------------------------------------------------ 掩膜
+#: 分割标签。0 是背景，其余按"读数算法真正关心的三块"划分。
+#:
+#: **为什么值得单独分出刻度环。**指针分割最大的干扰就是刻度线——它们同样是
+#: 从圆心往外的深色细长条。让模型显式学会区分"针"和"刻度"，比事后靠几何
+#: 规则去筛稳得多（几何法现在就是靠"贯穿整个半径带"这条规则筛的，见
+#: reading/pointer.py 的 _needle_angle）。
+SEG_LABELS = {"background": 0, "face": 1, "needle": 2, "ticks": 3}
+SEG_NAMES = ["background", "face", "needle", "ticks"]
+
+#: 表盘的几何比例。**RGB 与掩膜共用这一份**——分开写迟早会漂，
+#: 而漂了之后掩膜和图像错位，训出来的分割模型会系统性偏一个角度，
+#: 且没有任何报错。tests/test_dataset.py 会验证两者对齐。
+_R_OUT, _R_FACE = 0.46, 0.46 * 0.90
+_R_TICK, _R_TICK_IN = _R_FACE * 0.88, _R_FACE * 0.76
+_R_MINOR_IN = _R_FACE * 0.82
+_R_NEEDLE, _R_TAIL = _R_FACE * 0.80, _R_FACE * 0.20
+
+
+def render_pointer_gauge_mask(
+    size_px: int, *, value: float, range_min: float, range_max: float,
+    sweep_deg: float = 270.0, zero_offset_deg: float = -135.0,
+    major_ticks: int = 27,
+) -> np.ndarray:
+    """与 render_pointer_gauge 逐像素对齐的分割标签图（单通道 uint8）。
+
+    **不是"再画一遍"，是把同一套几何参数画到标签画布上。**比例常数
+    (_R_FACE / _R_TICK / _R_NEEDLE …) 两个函数共用，角度也走同一个
+    value_to_angle——所以掩膜天然对齐，不需要额外的配准步骤。
+
+    这一点是整个合成数据集的立足点：像素级标注在真实场景里是最贵的一种
+    标注（一块表盘要描十几分钟），而在这里它是免费的副产品。
+    """
+    s = int(size_px)
+    m = np.zeros((s, s), np.uint8)
+    cx = cy = (s - 1) / 2.0
+    cv2.circle(m, (int(cx), int(cy)), int(s * _R_FACE), SEG_LABELS["face"], -1,
+               cv2.LINE_8)
+
+    n_major = max(2, int(major_ticks))
+    w = max(1, s // 110)
+    for i in range(n_major):
+        a = zero_offset_deg + sweep_deg * i / (n_major - 1)
+        cv2.line(m, _polar(cx, cy, s * _R_TICK, a),
+                 _polar(cx, cy, s * _R_TICK_IN, a), SEG_LABELS["ticks"], w,
+                 cv2.LINE_8)
+        if i < n_major - 1:
+            for k in (1, 2, 3, 4):
+                am = a + sweep_deg / (n_major - 1) * k / 5.0
+                cv2.line(m, _polar(cx, cy, s * _R_TICK, am),
+                         _polar(cx, cy, s * _R_MINOR_IN, am),
+                         SEG_LABELS["ticks"], 1, cv2.LINE_8)
+
+    # 指针最后画：它压在刻度上面，标签也该如此
+    ang = value_to_angle(value, range_min, range_max, sweep_deg, zero_offset_deg)
+    cv2.line(m, _polar(cx, cy, s * _R_TAIL, ang + 180.0),
+             _polar(cx, cy, s * _R_NEEDLE, ang), SEG_LABELS["needle"],
+             max(2, int(s * 0.016)), cv2.LINE_8)
+    return m
+
+
 def render_pointer_gauge(
     size_px: int, *, value: float, range_min: float, range_max: float,
     sweep_deg: float = 270.0, zero_offset_deg: float = -135.0,
@@ -58,11 +119,12 @@ def render_pointer_gauge(
     s = int(size_px)
     img = np.full((s, s, 3), 236, np.uint8)
     cx = cy = (s - 1) / 2.0
-    r_out = s * 0.46
-    r_face = r_out * 0.90
-    r_tick = r_face * 0.88
-    r_tick_in = r_face * 0.76
-    r_minor_in = r_face * 0.82
+    # 比例常数与 render_pointer_gauge_mask 共用，见上面的说明
+    r_out = s * _R_OUT
+    r_face = s * _R_FACE
+    r_tick = s * _R_TICK
+    r_tick_in = s * _R_TICK_IN
+    r_minor_in = s * _R_MINOR_IN
 
     cv2.circle(img, (int(cx), int(cy)), int(r_out), _BEZEL, -1, cv2.LINE_AA)
     cv2.circle(img, (int(cx), int(cy)), int(r_face), _FACE, -1, cv2.LINE_AA)
@@ -110,8 +172,8 @@ def render_pointer_gauge(
 
     # 指针：主体 + 配重尾巴。尾巴让"取最长黑色射线"这种偷懒解法失效
     ang = value_to_angle(value, range_min, range_max, sweep_deg, zero_offset_deg)
-    r_needle = r_face * 0.80
-    r_tail = r_face * 0.20
+    r_needle = s * _R_NEEDLE
+    r_tail = s * _R_TAIL
     tipx, tipy = _polar(cx, cy, r_needle, ang)
     tailx, taily = _polar(cx, cy, r_tail, ang + 180.0)
     w_needle = max(2, int(s * 0.016))
