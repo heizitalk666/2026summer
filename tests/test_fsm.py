@@ -304,3 +304,39 @@ def test_no_trigger_while_gimbal_is_slewing(cfg):
     for _ in range(3):
         f.tick(detection=det_event(), status=status(at_target=True))
     assert f.state is State.SUSPECT, "云台停稳后应正常触发"
+
+
+def test_aim_does_not_hop_between_two_same_class_targets(cfg):
+    """AIM 期间同类目标不止一个时，伺服必须咬住一个，不能来回改判。
+
+    柜面上两块压力表相距 2.23 m，在 5 m 处约 770 px，会同时落在画面里。
+    只按"离画面中心最近"重认，云台摆到两者中间时就会左右横跳——实测速率
+    指令是 +17.6 / +20.5 / −14.2 / −21.3 / +12.8 / −23.1 °/s 这样一串，
+    三秒内进不了死区，最后超时 ABORT。
+    """
+    f = make_fsm(cfg, capture_cb=lambda ctx: True)
+    for _ in range(4):
+        f.tick(detection=det_event(track_id=7, cx=1200.0), status=status())
+    f.tick(status=status(chassis="STOPPED"))
+    assert f.state is State.AIM
+
+    def two_targets(near_cx, far_cx, near_id, far_id):
+        """两块同类表同时在画面里，跟踪每帧都换 id（云台在动，IoU 匹配不上）。"""
+        ev = det_event(track_id=near_id, cx=near_cx)
+        far = dict(ev["detections"][0])
+        far.update(track_id=far_id, bbox=[far_cx - 25, 575.0, far_cx + 25, 625.0])
+        ev["detections"] = [ev["detections"][0], far]
+        ev["detections"][0]["bbox"] = [near_cx - 25, 575.0, near_cx + 25, 625.0]
+        return ev
+
+    f.tick(detection=two_targets(1000.0, 250.0, 90, 91),
+           status=status(chassis="STOPPED", at_target=False, moving=True))
+    picked = []
+    for i in range(8):
+        # 每帧都给新的 track_id，逼状态机走"按类别重认"那一支
+        ev = two_targets(980.0, 240.0, 100 + i * 2, 101 + i * 2)
+        f.tick(detection=ev, status=status(chassis="STOPPED"))
+        d = f._reacquire(ev)                       # noqa: SLF001
+        picked.append(None if d is None else round((d["bbox"][0] + d["bbox"][2]) / 2))
+    assert set(x for x in picked if x is not None) == {980}, \
+        "重认在两个目标之间来回跳：%s" % picked

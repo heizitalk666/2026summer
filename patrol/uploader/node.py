@@ -173,6 +173,43 @@ class UploaderNode:
             self.log.error("打包失败", event_id=p.event_id[:8], detail=res.error)
         self.pending.pop(p.event_id, None)
 
+    def _harvest_aborted(self) -> None:
+        """状态机一中止就立刻出包，不必等 TTL。
+
+        中止的复核照样要打包上传——**复核失败的样本对调参最有价值**（ICD §6）。
+        但只靠 60 s 的 TTL 兜底会漏：一轮巡检跑完收工时，最后几个中止事件还没
+        到期就随进程一起没了。实测一轮里有一个中止事件只留下了 cruise 原图和
+        mission_ctx.json，台账里查无此事。
+
+        mission 进 ABORT 时就把 mission_ctx.json 写进证据目录了，看到它带
+        abort 就可以立刻定案。
+        """
+        for eid in list(self.pending):
+            p = self.pending[eid]
+            if p.before is None or p.after is not None:
+                continue
+            f = Path(self.packer.root) / self.run_id / eid / "mission_ctx.json"
+            try:
+                m = json.loads(f.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if m.get("abort"):
+                self._finish(p)
+
+    def flush(self) -> None:
+        """收工前把还开着的复核结清。见 _harvest_aborted 的说明。"""
+        for eid in list(self.pending):
+            p = self.pending[eid]
+            if p.before is None:
+                continue
+            f = Path(self.packer.root) / self.run_id / eid / "mission_ctx.json"
+            if not f.exists():
+                continue          # 没进入过复核，不出包
+            if p.abort is None and p.after is None:
+                p.abort = {"at_state": "VERIFY", "reason": "STATE_TIMEOUT",
+                           "detail": "巡检收工时该次复核尚未完成"}
+            self._finish(p)
+
     def _expire(self) -> None:
         """超时未收到 VERIFY 的事件按中止处理——复核失败的样本对调参最有价值。
 
@@ -220,6 +257,7 @@ class UploaderNode:
             self.on_detection(m)
         for m in self.status_sub.drain(max_n=128):
             self.on_status(m)
+        self._harvest_aborted()
         self._expire()
         now = time.monotonic()
         if now - self._last_upload >= self.upload_period_s:
@@ -245,6 +283,10 @@ class UploaderNode:
 
     def close(self) -> None:
         self._running = False
+        try:
+            self.flush()
+        except Exception as e:                    # noqa: BLE001
+            self.log.warn("收工结清失败", detail=str(e))
         self.det_sub.close()
         self.status_sub.close()
         self.queue.close()

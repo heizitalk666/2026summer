@@ -178,10 +178,33 @@ class FakeCar:
 
 # ---------------------------------------------------------------- PTY
 class _PtyLink:
-    """伪终端的一侧。用它就不需要 socat，也不需要两根 USB 转串口。"""
+    """伪终端的一侧。用它就不需要 socat，也不需要两根 USB 转串口。
+
+    **必须把伪终端设成 raw 模式。**默认的行规程会做两件要命的事：
+
+    - **回显**：上位机写进从端的字节被原样回给主端，假小车于是收到自己发出
+      的状态帧，判成 UNKNOWN_TYPE 再回一条 REJ，REJ 又被回显……链路瞬间被
+      自激的帧刷满，真正的指令挤不进去。实测表现是 PAUSE 发出去车不停，而
+      状态帧一直在正常上报——看起来像"指令丢了"，其实是链路被自己塞死了。
+    - **ONLCR**：把 `\\n` 换成 `\\r\\n`。本协议靠 `\\n` 分帧，多出来的 `\\r`
+      虽然会被 strip 掉，但 CRC 是按 `$` 与 `*` 之间的字节算的，一旦哪天在
+      帧中间插进控制字符就会整片校验失败。
+
+    真串口不存在这两条（USB 转串口设备本来就是 raw），所以这是伪终端仿真
+    特有的坑，值得在这里写清楚。
+    """
 
     def __init__(self) -> None:
+        import termios
+        import tty
         self.master, self.slave = os.openpty()
+        tty.setraw(self.master)
+        tty.setraw(self.slave)
+        for fd in (self.master, self.slave):
+            attrs = termios.tcgetattr(fd)
+            attrs[3] &= ~(termios.ECHO | termios.ECHONL | termios.ICANON)  # lflag
+            attrs[1] &= ~termios.ONLCR                                      # oflag
+            termios.tcsetattr(fd, termios.TCSANOW, attrs)
         os.set_blocking(self.master, False)
         self.name = os.ttyname(self.slave)
 
@@ -208,13 +231,19 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="假小车：说底盘串口协议的仿真底盘")
     ap.add_argument("--config", default=None)
     ap.add_argument("--pty", action="store_true", help="建伪终端（默认行为）")
-    ap.add_argument("--seed", type=int, default=0)
+    # 默认用随机种子。固定种子加上大致固定的时序，会让 2 % 的丢包注入每次都
+    # 落在同一条指令上——演示时表现为"PAUSE 每次都不生效"，看着像链路坏了，
+    # 其实是桩在按设计丢包。要复现某次现象再用 --seed 固定。
+    ap.add_argument("--seed", type=int, default=None,
+                    help="随机种子。默认随机；给定后可复现同一串故障注入")
     ap.add_argument("-v", "--verbose", action="store_true", help="打印收发的每一帧")
     a = ap.parse_args()
 
     cfg = Config.load(a.config)
+    seed = a.seed if a.seed is not None else int.from_bytes(os.urandom(4), "little")
     link = _PtyLink()
-    car = FakeCar(cfg, link, seed=a.seed, verbose=a.verbose)
+    car = FakeCar(cfg, link, seed=seed, verbose=a.verbose)
+    print("随机种子 %d（--seed %d 可复现本次的故障注入序列）" % (seed, seed))
     print("假小车已就绪，串口设备：%s" % link.name)
     print("把它填进 configs/real.yaml 的 real.serial.chassis.port，")
     print("并把 configs/system.yaml 的 driver_mode 改成 real。Ctrl-C 退出。")

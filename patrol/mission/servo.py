@@ -160,7 +160,15 @@ class AxisPID:
             if inside[i] and bool(np.all(inside[i:])):
                 settle = float(t[i] - t[0])
                 break
-        tail = e[max(0, len(e) - 10):]
+        # 稳态误差要在**进入死区之后**那段上量。固定取最后 10 拍的话，一次
+        # 只跑了 12 拍就收敛的整定过程会把开头的大偏差算进来——实测报出过
+        # settling_time = 0.9 s 而 steady_error = 195 px 这种自相矛盾的组合，
+        # 读日志的人会以为伺服没收敛。
+        if settle is not None:
+            i0 = int(np.searchsorted(t - t[0], settle))
+            tail = e[i0:] if len(e) - i0 >= 3 else e[max(0, len(e) - 3):]
+        else:
+            tail = e[max(0, len(e) - 10):]
         return {
             "step_px": e0,
             "overshoot_pct": round(overshoot, 3),

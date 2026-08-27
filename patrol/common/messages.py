@@ -303,5 +303,8 @@ def compute_gain(before: dict, after: dict, *, verdict_result: str,
     return {
         "delta_conf": round(max(-1.0, min(1.0, delta)), 4),
         "pixel_density_ratio": round(ratio, 4),
-        "verify_success": (not aborted) and verdict_result != "INCONCLUSIVE",
+        # 没有 before 基准的复核算不上成功：三项增益全是拿它做基准算的，
+        # 缺了它这一包既证明不了复核有效，也不该被统计成"成功"去抬高成功率。
+        "verify_success": ((not aborted) and verdict_result != "INCONCLUSIVE"
+                           and ratio > 0.0),
     }

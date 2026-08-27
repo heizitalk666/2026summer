@@ -261,3 +261,39 @@ def test_aborted_verification_still_becomes_a_package(node):
     assert m["verdict"]["result"] == "INCONCLUSIVE"
     assert m["abort"]["at_state"] == "AIM"
     assert m["gain"]["verify_success"] is False
+
+
+def test_aborted_verification_is_packed_immediately_not_after_ttl(node):
+    """状态机一中止就出包，不必等 60 s 的 TTL。
+
+    只靠 TTL 兜底会漏：一轮巡检收工时最后几个中止事件还没到期就随进程没了，
+    台账里查无此事——而中止的复核样本恰恰是最有调参价值的。
+    """
+    eid = "10d09cca-0000-4000-8000-000000000007"
+    node.stale_s = 1e6                              # TTL 长到不可能触发
+    node.on_detection(det_event(event_id=eid, stage="CRUISE", conf=0.45,
+                                p=49.9, zoom=1.0))
+    d = node.packer.dir_for(node.run_id, eid)
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "mission_ctx.json").write_text(json.dumps({
+        "abort": {"at_state": "AIM", "reason": "STATE_TIMEOUT", "detail": "AIM 超时"}},
+        ensure_ascii=False), encoding="utf-8")
+    node._harvest_aborted()                         # noqa: SLF001
+    assert eid not in node.pending
+    m = json.loads((d / "manifest.json").read_text(encoding="utf-8"))
+    assert m["abort"]["at_state"] == "AIM"
+
+
+def test_flush_on_shutdown_settles_open_verifications(node):
+    """收工前把还开着的复核结清，但**只结清真的进入过复核的**。"""
+    verified = "20000000-0000-4000-8000-000000000008"
+    suppressed = "30000000-0000-4000-8000-000000000009"
+    for eid in (verified, suppressed):
+        node.on_detection(det_event(event_id=eid, stage="CRUISE", conf=0.45,
+                                    p=49.9, zoom=1.0))
+    d = node.packer.dir_for(node.run_id, verified)
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "mission_ctx.json").write_text("{}", encoding="utf-8")
+    node.flush()
+    assert (d / "manifest.json").exists()
+    assert not (node.packer.dir_for(node.run_id, suppressed) / "manifest.json").exists()

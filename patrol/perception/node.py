@@ -312,12 +312,16 @@ class PerceptionNode:
                     severity=suspect["severity"], novelty=suspect["novelty"],
                     priority=suspect["priority"], suppressed_by="RESUME_SILENCE")
 
-        # **复核全程必须携带同一个 event_id**（ICD §2.2：它是串起四份 Schema
-        # 的主键）。复核态的报文里 is_suspect 通常已经变回 false——变焦之后
-        # 像素密度达标、二级模型置信度也上去了，触发判据自然不再成立——但
-        # 这条报文正是 uploader 用来配对 after 的那一条，丢了 event_id 就
-        # 配不上 before，证据包的增益指标全是零。
-        carry_id = self.event_id if (suspect["is_suspect"] or stage == "VERIFY") else None
+        # **持有 event_id 期间，每一条报文都带上它。**ICD §2.2 把它定义成
+        # 串起四份 Schema 的主键，那就该覆盖这次事件的整条时间线，而不只是
+        # 触发判据恰好成立的那几帧。
+        #
+        # 只在 is_suspect 为真时带的后果实测过两次：复核态的报文里判据早已
+        # 不成立（变焦之后像素密度达标、置信度也上去了），那条报文丢了主键
+        # 就配不上 before；而触发前后判据闪断的那几帧不带主键，uploader 会
+        # 拿不到 before 快照，增益比算出来是 0——实测一轮里就有一个证据包
+        # 只收到了 VERIFY 那一条，before 是空的。
+        carry_id = self.event_id
 
         t_now = mono_ns()
         latency = {

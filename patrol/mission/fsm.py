@@ -27,6 +27,7 @@ false。中止的复核照样打包上传，因为复核失败的样本对调参
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
@@ -93,8 +94,16 @@ class VerifyContext:
     timeline: list[dict] = field(default_factory=list)
     abort: dict | None = None
     target_zoom: float = 3.0
+    #: 触发那一刻算出的指向角（当前云台位姿 + aim_offset），body 系。
+    #: AIM 进来时目标已经不在画面里的话，靠它把云台先摆回去重新找。
+    aim_hint: tuple[float, float] | None = None
     used_aux: bool = False
     started_ns: int = field(default_factory=mono_ns)
+
+
+def _center(det: dict) -> tuple[float, float]:
+    b = det["bbox"]
+    return (b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0
 
 
 class MissionFSM:
@@ -102,6 +111,11 @@ class MissionFSM:
 
     这样它可以在测试里被逐状态驱动，不需要起四个进程。
     """
+
+    #: AIM 期间允许的最大帧间形心跳变。云台上限 60 °/s，一拍 100 ms 最多扫过
+    #: 6°，1920 px / 60° 下约 192 px；留一倍余量给检测框抖动。超过它的"同类
+    #: 目标"必定是画面里的另一个东西。
+    MAX_JUMP_PX = 400.0
 
     def __init__(self, cfg, *, budget: VerifyBudget, suppress: SuppressionState,
                  servo: GimbalServo,
@@ -138,6 +152,7 @@ class MissionFSM:
         self._confirm_track: int | None = None
         self._ff_done = False           # AIM 的前馈那一步是否已经走完
         self._ff_moved = False
+        self._aim_last_cxy: tuple[float, float] | None = None
         self._resume_retried = False
         self._last_status: dict | None = None
         self._last_det: dict | None = None
@@ -164,6 +179,7 @@ class MissionFSM:
             self.servo.reset()
             self._ff_done = False
             self._ff_moved = False
+            self._aim_last_cxy = None
         if nxt is State.RESUME:
             self._resume_retried = False
         if self.on_transition:
@@ -302,6 +318,14 @@ class MissionFSM:
             z = float(d["context"]["ptz"]["zoom"])
             from patrol.scene.optics import zoom_for_density
             self.ctx.target_zoom = zoom_for_density(z, p, self.p_min, self.max_zoom)
+            # 记下触发那一刻的指向角。停车要 1.5–2.5 s，这期间车还要往前滑
+            # 一米左右，画面边缘的目标可能已经划出去了；进到 AIM 才发现没有
+            # 反馈量可用，就只能干等超时。有了它至少能先把云台摆回目标当时
+            # 所在的方位，给检测器一次重新找到它的机会。
+            ptz0, off = d["context"]["ptz"], det.get("aim_offset", {})
+            self.ctx.aim_hint = (
+                float(np.clip(ptz0["pan_deg"] + off.get("pan_deg", 0.0), -170, 170)),
+                float(np.clip(ptz0["tilt_deg"] + off.get("tilt_deg", 0.0), -30, 60)))
         pose = (d.get("context") or {}).get("pose") or {}
         self.ctx.pose_xy = (float(pose.get("x_m", 0.0)), float(pose.get("y_m", 0.0)))
         self._goto(State.SUSPECT, s.get("trigger_rule") or "")
@@ -398,6 +422,14 @@ class MissionFSM:
             # 只能干等到超时。计数暴露出来，便于判断是"目标出框"还是
             # "检测器漏检"。
             self.stats["aim_no_target"] = self.stats.get("aim_no_target", 0) + 1
+            if first and self.ctx is not None and self.ctx.aim_hint is not None:
+                # 一进 AIM 就没有目标，多半是停车那 1.5–2.5 s 里车又往前滑了，
+                # 画面边缘的目标划出去了。先按触发时记下的方位把云台摆回去，
+                # 给检测器一次重新找到它的机会——总比原地干等三秒强。
+                pan, tilt = self.ctx.aim_hint
+                return [Command("PTZ_SET", {"pan_deg": pan, "tilt_deg": tilt,
+                                            "zoom": 1.0, "speed": "NORMAL"},
+                                timeout_ms=3000)]
             return []
         if self.servo_mode == "open_loop":
             # ICD v1.0 原样：一次 PTZ_SET + 等 at_target，没有后续修正

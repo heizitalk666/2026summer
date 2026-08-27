@@ -312,3 +312,70 @@ def test_stale_status_reports_fault(rig):
     rig.pause_pump()                     # 底盘不再发状态帧
     time.sleep(rig.chassis.status_timeout_s + 0.3)
     assert rig.chassis.status().state is ChassisState.FAULT
+
+
+# ---------------------------------------------------------------- 真·伪终端
+@pytest.mark.slow
+def test_pty_link_end_to_end(tmp_path):
+    """走真正的 pyserial + 伪终端，而不是内存回环。
+
+    这条覆盖的是内存回环覆盖不到的一层：**伪终端的行规程**。默认的行规程
+    带回显与 ONLCR，回显会让假小车收到自己发出的状态帧、判成 UNKNOWN_TYPE
+    再回一条 REJ，REJ 又被回显——链路瞬间被自激的帧刷满，真正的指令挤不
+    进去。表现是"指令发出去没反应，状态帧却一直正常上报"，很容易误判成
+    协议写错了。fakecar 的 _PtyLink 因此必须把两端都设成 raw。
+
+    ACK 丢包是**按设计注入**的（2 %），所以这里给足重试次数：上层的约定
+    本来就是靠超时发现并重发，而不是假设每条指令都到得了。
+    """
+    serial = pytest.importorskip("serial")       # noqa: F841
+    from patrol.tools.fakecar import _PtyLink
+
+    cfg = Config.load(overrides={
+        "logging": {"dir": str(tmp_path / "logs")},
+        "real": {"serial": {"chassis": {"ping_period_s": 0.1}}}})
+    link = _PtyLink()
+    car = FakeCar(cfg, link, seed=12345)
+    stop = threading.Event()
+    t = threading.Thread(
+        target=lambda: [car.step() for _ in iter(lambda: stop.wait(0.005), True)],
+        daemon=True)
+    t.start()
+    drv = ChassisSerial(
+        Config.load(overrides={"logging": {"dir": str(tmp_path / "logs")},
+                               "real": {"serial": {"chassis": {
+                                   "port": link.name, "ping_period_s": 0.1}}}}))
+
+    def wait(pred, timeout_s=6.0):
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < timeout_s:
+            try:
+                if pred():
+                    return True
+            except Exception:                     # noqa: BLE001
+                pass
+            time.sleep(0.02)
+        return False
+
+    try:
+        assert wait(lambda: drv.status().state is ChassisState.MOVING), \
+            "伪终端上收不到状态帧"
+        stopped = False
+        for _ in range(4):                        # 丢包了就重发，这正是设计的路径
+            drv.pause("VERIFY_REQUEST")
+            if wait(lambda: drv.status().state is ChassisState.STOPPED, 4.0):
+                stopped = True
+                break
+        assert stopped, "四次 PAUSE 都没让车停下来"
+
+        seen: list[dict] = []
+        drv.subscribe_safety(seen.append)
+        car.chassis.force_safety_event("BUMPER_HIT")
+        assert wait(lambda: bool(seen), 3.0), "安全事件没穿过伪终端"
+        assert seen[0]["event_type"] == "BUMPER_HIT"
+    finally:
+        stop.set()
+        t.join(timeout=2)
+        drv.close()
+        car.close()
+        link.close()
