@@ -72,3 +72,30 @@ tbody tr:hover{background:var(--surface-2)}
 .reviewCard{background:var(--surface);border:1px solid var(--rule);padding:14px;margin-bottom:10px}
 .reviewCard .acts{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
 .log{font-family:var(--mono);font-size:.76rem;color:var(--ink-2);margin-top:8px}
+
+/* ---- 实时页 ---- */
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;
+  background:var(--ok);margin-left:4px;vertical-align:middle}
+.dot.off{background:var(--ink-3)}
+.dot.stale{background:var(--warn)}
+.live-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:18px}
+@media (max-width:900px){.live-grid{grid-template-columns:1fr}}
+.live-col h3{font-size:.9rem;margin:0 0 8px;font-weight:600}
+.live-col h3 .muted{font-weight:400}
+.muted{color:var(--ink-3);font-size:.84rem}
+.live-log{max-height:460px}
+.live-models{max-height:180px}
+.live-log table,.live-models table{font-family:var(--mono);font-size:.78rem}
+.live-log tr.bad td{color:var(--crit)}
+.live-log td.t{color:var(--ink-3);white-space:nowrap}
+.live-log td.tgt{white-space:nowrap}
+#liveMap{width:100%;height:auto;max-height:300px;background:var(--surface);
+  border:1px solid var(--rule)}
+#liveMap .aisle{stroke:var(--rule);stroke-width:.06;fill:none;stroke-dasharray:.25 .18}
+#liveMap .cab{fill:var(--surface-2);stroke:var(--rule);stroke-width:.04}
+#liveMap .wp{fill:var(--ink-3)}
+#liveMap .wplbl{fill:var(--ink-3);font-size:.28px;font-family:var(--mono)}
+#liveMap .tgt{fill:var(--info)}
+#liveMap .fov{fill:var(--accent);opacity:.18}
+#liveMap .car{fill:var(--accent)}
+#liveMap .carhead{stroke:var(--accent);stroke-width:.09}

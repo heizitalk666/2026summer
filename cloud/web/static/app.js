@@ -7,7 +7,7 @@ const pill = (cls, txt) => `<span class="pill ${cls}">${txt}</span>`;
 $$('.tab').forEach(b => b.onclick = () => {
   $$('.tab').forEach(x => x.classList.toggle('active', x === b));
   $$('.panel').forEach(p => p.classList.toggle('hidden', p.id !== b.dataset.tab));
-  ({ ledger: loadLedger, review: loadReview, stats: loadStats, models: loadModels })[b.dataset.tab]();
+  ({ ledger: loadLedger, review: loadReview, stats: loadStats, models: loadModels, live: loadLive })[b.dataset.tab]();
 });
 $('#closeDetail').onclick = () => $('#detail').classList.add('hidden');
 $('#refresh').onclick = loadLedger;
@@ -137,3 +137,102 @@ $('#modelForm').onsubmit = async e => {
 };
 
 loadRuns().then(loadLedger);
+
+/* ==================================================================
+   实时页：指令流水 + 配电室俯视
+   ------------------------------------------------------------------
+   数据来自 patrol/tools/console.py 推上来的 /api/live/push，云端只在
+   内存里留最近一段，不落库。所以刷新页面会丢历史——这是有意的：实时页
+   要看的是"现在在做什么"，事后要查的东西在台账页。
+   ================================================================== */
+const LIVE = { after: 0, timer: null, map: null, rows: [] };
+
+async function loadLive() {
+  if (!LIVE.map) {
+    try { LIVE.map = await api('/api/live/map'); } catch (e) { LIVE.map = { waypoints: [], targets: [] }; }
+    drawMapBase();
+  }
+  if (!LIVE.timer) LIVE.timer = setInterval(pollLive, 500);
+  pollLive();
+}
+function stopLive() { clearInterval(LIVE.timer); LIVE.timer = null; }
+
+async function pollLive() {
+  if ($('#live').classList.contains('hidden')) return stopLive();
+  let s;
+  try { s = await api(`/api/live/state?after_ms=${LIVE.after}`); }
+  catch (e) { return setLiveState('off', '云端不可达'); }
+
+  const stale = s.stale_s;
+  if (stale === null) setLiveState('off', '等待车端数据…（先跑 python -m patrol.tools.console --push http://127.0.0.1:8000）');
+  else if (stale > 5) setLiveState('stale', `已 ${stale.toFixed(0)} s 没有新数据`);
+  else setLiveState('', '车端在线');
+
+  const showHb = $('#liveHeartbeat').checked;
+  for (const c of s.commands) {
+    LIVE.after = Math.max(LIVE.after, c.ts_utc_ms || 0);
+    if (c.command === 'HEARTBEAT' && c.ok && !showHb) continue;
+    LIVE.rows.push(c);
+  }
+  if (LIVE.rows.length > 300) LIVE.rows = LIVE.rows.slice(-300);
+  renderLiveRows();
+  if (s.snapshot && Object.keys(s.snapshot).length) drawMapLive(s.snapshot);
+}
+
+function setLiveState(cls, text) {
+  $('#liveDot').className = 'dot ' + cls;
+  $('#liveState').textContent = text;
+}
+
+function renderLiveRows() {
+  const t0 = LIVE.rows.length ? LIVE.rows[0].ts_utc_ms : 0;
+  $('#liveTbl tbody').innerHTML = LIVE.rows.map(c => `
+    <tr class="${c.ok ? '' : 'bad'}">
+      <td class="t">${((c.ts_utc_ms - t0) / 1000).toFixed(1)}s</td>
+      <td class="tgt">${c.target || ''}</td>
+      <td>${c.text || ''}${c.detail ? ' — ' + c.detail : ''}</td>
+      <td>${c.ok ? '✓' : '✗ 拒绝'}</td>
+      <td class="t">${(c.latency_ms ?? 0).toFixed(1)} ms</td>
+    </tr>`).join('');
+  const box = $('.live-log');
+  if (box) box.scrollTop = box.scrollHeight;   // 跟着最新的走
+}
+
+/* 俯视图。坐标直接用米，viewBox 就是配电室的平面尺寸，
+   所以下面所有数字都能对着 configs/waypoints.yaml 读。
+   注意 SVG 的 y 轴向下，而地图系 y 轴向上，所以画的时候取负。 */
+function drawMapBase() {
+  const wps = LIVE.map.waypoints || [], tg = LIVE.map.targets || [];
+  const parts = [
+    `<rect class="cab" x="-0.5" y="${-(1.82 + 0.9)}" width="17" height="1.2"/>`,
+    `<polyline class="aisle" points="${wps.map(w => `${w.x_m},${-w.y_m}`).join(' ')}"/>`
+  ];
+  for (const w of wps) parts.push(
+    `<circle class="wp" cx="${w.x_m}" cy="${-w.y_m}" r="0.12"/>`,
+    `<text class="wplbl" x="${w.x_m}" y="${-w.y_m + 0.5}" text-anchor="middle">${(w.id || '').replace('WP-', '')}</text>`);
+  for (const t of tg) parts.push(
+    `<rect class="tgt" x="${t.x_m - 0.16}" y="${-t.y_m - 0.16}" width="0.32" height="0.32"/>`);
+  $('#liveMap').innerHTML = parts.join('') + '<g id="liveCar"></g>';
+}
+
+function drawMapLive(s) {
+  const x = s.x_m ?? 0, y = -(s.y_m ?? 0);
+  // 相机方位角 = 车头朝向 + 云台 pan。视场半角由 hfov 给，它随变焦收窄——
+  // 扇形一收紧就是"正在放大细看"，这是俯视图上最直观的一个信号。
+  const az = ((s.yaw_deg ?? 0) + (s.pan_deg ?? 0)) * Math.PI / 180;
+  const half = ((s.hfov_deg ?? 60) / 2) * Math.PI / 180;
+  const R = 6.5;
+  const p = (a) => `${(x + R * Math.cos(a)).toFixed(3)},${(y - R * Math.sin(a)).toFixed(3)}`;
+  const head = `${(x + 0.55 * Math.cos((s.yaw_deg ?? 0) * Math.PI / 180)).toFixed(3)},${(y - 0.55 * Math.sin((s.yaw_deg ?? 0) * Math.PI / 180)).toFixed(3)}`;
+  $('#liveCar').innerHTML =
+    `<polygon class="fov" points="${x},${y} ${p(az - half)} ${p(az)} ${p(az + half)}"/>` +
+    `<line class="carhead" x1="${x}" y1="${y}" x2="${head.split(',')[0]}" y2="${head.split(',')[1]}"/>` +
+    `<circle class="car" cx="${x}" cy="${y}" r="0.20"/>`;
+  $('#liveDet tbody').innerHTML = (s.detections || []).map(d => `
+    <tr><td>${d.defect_class ?? ''}</td><td>${(d.confidence ?? 0).toFixed(2)}</td>
+    <td>${(d.pixel_density_px ?? 0).toFixed(0)} px</td>
+    <td>${d.l2 === null || d.l2 === undefined ? '—'
+      : `${d.l2}${d.unit ? ' ' + d.unit : ''} ${d.in_band === false ? '⚠出带' : d.in_band === true ? '✓带内' : ''}`}</td></tr>`).join('');
+}
+
+$('#liveClear').onclick = () => { LIVE.rows = []; renderLiveRows(); };

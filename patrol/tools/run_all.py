@@ -4,6 +4,7 @@
     python -m patrol.tools.run_all                 # 四进程 + 云端，跑到 Ctrl-C
     python -m patrol.tools.run_all --seconds 90    # 跑 90 秒后自动收工并出报告
     python -m patrol.tools.run_all --no-cloud      # 只跑边缘端
+    python -m patrol.tools.run_all --console       # 顺便把指令流水打在同一个终端
 
 进程与 ICD §1.1 的划分一一对应：
 
@@ -113,6 +114,8 @@ def main() -> int:
     ap.add_argument("--seconds", type=float, default=0.0, help="0 表示跑到 Ctrl-C")
     ap.add_argument("--no-cloud", action="store_true")
     ap.add_argument("--quiet", action="store_true", help="子进程日志不打到终端")
+    ap.add_argument("--console", action="store_true",
+                    help="同时起指令流水控制台，并把它推给云端网页的「实时」页")
     a = ap.parse_args()
 
     from patrol.common.config import Config
@@ -141,6 +144,18 @@ def main() -> int:
         # 网关要先绑定端口，感知与任务再连上来
         time.sleep(1.2 if name == "gateway" else 0.4)
 
+    if a.console:
+        # 控制台是只读的（跟读审计日志 + 订阅 IF-3），起在最后，
+        # 起晚了也不影响——AuditTail 会把已经写下的那些补上
+        url = None if a.no_cloud else "http://%s:%s" % (cfg.get("cloud.host"),
+                                                        cfg.get("cloud.port"))
+        cmd = [sys.executable, "-m", "patrol.tools.console", "--from-start"]
+        if url:
+            cmd += ["--push", url]
+        procs.append(("console", subprocess.Popen(cmd, cwd=REPO, env=env)))
+        print("已启动 console（指令流水）%s"
+              % ("" if not url else "，并推送到 %s 的「实时」页" % url))
+
     print("\n全系统运行中。Ctrl-C 收工。")
     stop = {"flag": False}
     signal.signal(signal.SIGINT, lambda *_: stop.__setitem__("flag", True))
@@ -159,7 +174,7 @@ def main() -> int:
     finally:
         # mission 先停：停了心跳，网关看门狗会介入让车走完路线，
         # 这正是设计要的行为，顺便把这条路径也跑一遍
-        order = ["mission", "perception", "uploader", "cloud", "gateway"]
+        order = ["console", "mission", "perception", "uploader", "cloud", "gateway"]
         for name in order:
             for n, p in list(procs):
                 if n != name:

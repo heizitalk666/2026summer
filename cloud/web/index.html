@@ -14,6 +14,7 @@
     <button class="tab" data-tab="review">人工复核 <span id="badge" class="badge">0</span></button>
     <button class="tab" data-tab="stats">复核增益</button>
     <button class="tab" data-tab="models">模型版本</button>
+    <button class="tab" data-tab="live">实时 <span id="liveDot" class="dot off"></span></button>
   </nav>
 </header>
 
@@ -63,6 +64,31 @@
     <div class="scroll"><table id="modelTbl">
       <thead><tr><th>版本</th><th>阶段</th><th>数据集</th><th>指标</th><th>备注</th><th>状态</th></tr></thead>
       <tbody></tbody></table></div>
+  </section>
+
+  <!-- 实时：没有硬件时，这一页就是"车"和"云台"唯一看得见的样子 -->
+  <section id="live" class="panel hidden">
+    <div class="filters">
+      <span id="liveState" class="muted">等待车端数据…</span>
+      <label class="chk"><input type="checkbox" id="liveHeartbeat"> 显示心跳</label>
+      <button id="liveClear">清屏</button>
+    </div>
+    <div class="live-grid">
+      <div class="live-col">
+        <h3>指令流水 <span class="muted">下发给小车与云台的每一条</span></h3>
+        <div class="scroll live-log"><table id="liveTbl">
+          <thead><tr><th>时刻</th><th>对象</th><th>指令</th><th>结果</th><th>耗时</th></tr></thead>
+          <tbody></tbody></table></div>
+      </div>
+      <div class="live-col">
+        <h3>配电室俯视 <span class="muted">车位姿与云台视场</span></h3>
+        <svg id="liveMap" viewBox="-1 -6 18 10" preserveAspectRatio="xMidYMid meet"></svg>
+        <h3>四路模型当前输出</h3>
+        <div class="scroll live-models"><table id="liveDet">
+          <thead><tr><th>类别</th><th>L1 置信</th><th>像素密度</th><th>L2 读数</th></tr></thead>
+          <tbody></tbody></table></div>
+      </div>
+    </div>
   </section>
 </main>
 

@@ -22,6 +22,8 @@ import argparse
 import hashlib
 import json
 import time
+from collections import deque
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -161,6 +163,72 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     @app.get("/api/models")
     def list_models():
         return ledger.models()
+
+    # -------------------------------------------------------- 实时遥测
+    #
+    # **这一路数据不落库、不进台账，只在内存里留最近一段。**
+    #
+    # 云端的职责是"事后可查"——证据包、裁决、模型版本，这些都要持久化。
+    # 实时指令流是"当场可见"，性质完全不同：它每秒几十条、没有留存价值、
+    # 而且断了重连就该从当前状态接着看，不该补历史。把它写进 SQLite 只会
+    # 让台账库被无用数据撑爆，还会让"库里有什么"这件事变得说不清。
+    #
+    # 推送方是 patrol/tools/console.py（唯一订阅总线的显示进程）。云端在
+    # 这里只做一件事：接住、留最近 N 条、给网页取。车不在线时这一路自然
+    # 就是空的，台账照常能看。
+    live: dict = {"commands": deque(maxlen=int(cfg.get("cloud.live_ring", 400))),
+                  "snapshot": {}, "updated_ms": 0}
+
+    @app.post("/api/live/push")
+    async def live_push(req: Request):
+        body = await req.json()
+        cmds = body.get("commands") or []
+        if not isinstance(cmds, list):
+            raise HTTPException(status_code=400, detail="commands 必须是数组")
+        for c in cmds[:200]:
+            if isinstance(c, dict):
+                live["commands"].append(c)
+        snap = body.get("snapshot")
+        if isinstance(snap, dict):
+            live["snapshot"] = snap
+        live["updated_ms"] = int(time.time() * 1000)
+        return {"ok": True, "buffered": len(live["commands"])}
+
+    @app.get("/api/live/state")
+    def live_state(after_ms: int = 0, limit: int = 120):
+        """网页轮询这一个端点。
+
+        用轮询而不是 SSE：本地演示 2 Hz 轮询和推流看不出差别，而 SSE 要引入
+        异步生成器与连接生命周期管理，多出来的复杂度全落在"演示时它别崩"这
+        件最不该冒险的事上。`after_ms` 让网页只取自己没见过的那几条。
+        """
+        lim = max(1, min(int(limit), 400))
+        cmds = [c for c in live["commands"]
+                if int(c.get("ts_utc_ms", 0)) > int(after_ms)][-lim:]
+        stale_s = ((int(time.time() * 1000) - live["updated_ms"]) / 1000.0
+                   if live["updated_ms"] else None)
+        return {"commands": cmds, "snapshot": live["snapshot"],
+                "updated_ms": live["updated_ms"],
+                # 网页据此显示"车在线 / 已 12 s 没有数据"，比静默停更新强
+                "stale_s": None if stale_s is None else round(stale_s, 1)}
+
+    @app.get("/api/live/map")
+    def live_map():
+        """俯视图的静态底图：过道折线、航点、柜面上的目标。
+
+        车与云台每秒动几十次，这些一轮里一次都不动，所以分开取一次就够——
+        每次轮询都把它们捎上是白费带宽，也让轮询响应大得没必要。
+        """
+        wps = [{"id": w.get("id"), "x_m": w.get("x_m"), "y_m": w.get("y_m")}
+               for w in (cfg.get("waypoints") or [])]
+        tgts = []
+        for t in (cfg.get("scene.targets") or []):
+            pos = t.get("position") or {}
+            tgts.append({"id": t.get("id"), "x_m": pos.get("x_m"),
+                         "y_m": pos.get("y_m"),
+                         "kind": (t.get("truth") or {}).get("kind")})
+        return {"waypoints": wps, "targets": tgts,
+                "route": cfg.get("scene.route.points") or []}
 
     @app.get("/healthz")
     def healthz():

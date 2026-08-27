@@ -308,3 +308,67 @@ def test_list_limit_is_clamped(client):
     c, _ = client
     assert c.get("/api/evidence?limit=999999999").status_code == 200
     assert c.get("/api/evidence?limit=0").status_code == 200
+
+
+# ================================================================== 实时遥测
+#
+# 这一路和台账的性质完全不同：不落库、只留最近一段、断了重连从当前状态接着看。
+# 用例钉的正是这个分界——**实时数据不许污染台账库**。
+class TestLive:
+    def test_push_then_read_back(self, client):
+        client, _storage = client
+        r = client.post("/api/live/push", json={
+            "commands": [{"ts_utc_ms": 10, "target": "云台", "text": "转到 pan=+90.0°",
+                          "ok": True, "latency_ms": 1.2, "command": "PTZ_SET"}],
+            "snapshot": {"x_m": 12.4, "y_m": -3.18, "pan_deg": 90.0, "zoom": 2.4}})
+        assert r.status_code == 200 and r.json()["buffered"] == 1
+        s = client.get("/api/live/state").json()
+        assert s["commands"][0]["text"].startswith("转到")
+        assert s["snapshot"]["zoom"] == 2.4
+
+    def test_after_ms_only_returns_unseen_commands(self):
+        """网页每 500 ms 轮询一次，重复发同一批会让流水刷屏。"""
+        from cloud.server import create_app
+        from fastapi.testclient import TestClient
+        c = TestClient(create_app())
+        c.post("/api/live/push", json={"commands": [
+            {"ts_utc_ms": 10, "text": "a"}, {"ts_utc_ms": 20, "text": "b"}]})
+        assert [x["text"] for x in c.get("/api/live/state?after_ms=10").json()["commands"]] == ["b"]
+        assert c.get("/api/live/state?after_ms=99").json()["commands"] == []
+
+    def test_live_data_never_reaches_the_ledger(self, client):
+        """**实时流不落库。**它每秒几十条、没有留存价值，写进去只会撑爆台账。"""
+        client, _storage = client
+        before = len(client.get("/api/evidence").json())
+        client.post("/api/live/push", json={"commands": [
+            {"ts_utc_ms": 1, "text": "x"} for _ in range(50)]})
+        assert len(client.get("/api/evidence").json()) == before
+
+    def test_ring_buffer_bounds_memory(self, client):
+        """车跑一天不能把云端内存吃光。"""
+        client, _storage = client
+        for i in range(600):
+            client.post("/api/live/push",
+                        json={"commands": [{"ts_utc_ms": i, "text": "x"}]})
+        assert len(client.get("/api/live/state?limit=400").json()["commands"]) <= 400
+
+    def test_stale_seconds_tells_the_page_the_car_went_quiet(self, client):
+        """静默停更新最难查。如实报"已 N 秒没有数据"比页面看起来正常好。"""
+        client, _storage = client
+        assert client.get("/api/live/state").json()["stale_s"] is None
+        client.post("/api/live/push", json={"commands": []})
+        assert client.get("/api/live/state").json()["stale_s"] is not None
+
+    def test_malformed_push_is_rejected_not_crashed(self, client):
+        client, _storage = client
+        assert client.post("/api/live/push",
+                           json={"commands": "不是数组"}).status_code == 400
+        client.post("/api/live/push", json={"commands": [1, 2, "x"]})   # 非法元素跳过
+        assert client.get("/api/live/state").json()["commands"] == []
+
+    def test_map_gives_the_page_its_static_backdrop(self, client):
+        """俯视图的底图一轮里一次都不动，分开取一次，别每次轮询都捎上。"""
+        client, _storage = client
+        m = client.get("/api/live/map").json()
+        assert m["waypoints"] and m["targets"]
+        assert all({"id", "x_m", "y_m"} <= set(w) for w in m["waypoints"])
