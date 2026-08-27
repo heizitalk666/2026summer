@@ -186,12 +186,13 @@ function setLiveState(cls, text) {
 
 function renderLiveRows() {
   const t0 = LIVE.rows.length ? LIVE.rows[0].ts_utc_ms : 0;
+  // 通过/拒绝并进"指令"那一列：单独一列会把耗时挤出可视范围，而耗时是
+  // 演示时要说的数（每条指令 1–2 ms 就走完了整条校验链）
   $('#liveTbl tbody').innerHTML = LIVE.rows.map(c => `
     <tr class="${c.ok ? '' : 'bad'}">
       <td class="t">${((c.ts_utc_ms - t0) / 1000).toFixed(1)}s</td>
       <td class="tgt">${c.target || ''}</td>
-      <td>${c.text || ''}${c.detail ? ' — ' + c.detail : ''}</td>
-      <td>${c.ok ? '✓' : '✗ 拒绝'}</td>
+      <td>${c.ok ? '✓' : '✗'} ${c.text || ''}${c.detail ? ' — ' + c.detail : ''}</td>
       <td class="t">${(c.latency_ms ?? 0).toFixed(1)} ms</td>
     </tr>`).join('');
   const box = $('.live-log');
@@ -232,7 +233,7 @@ function drawMapLive(s) {
     <tr><td>${d.defect_class ?? ''}</td><td>${(d.confidence ?? 0).toFixed(2)}</td>
     <td>${(d.pixel_density_px ?? 0).toFixed(0)} px</td>
     <td>${d.l2 === null || d.l2 === undefined ? '—'
-      : `${d.l2}${d.unit ? ' ' + d.unit : ''} ${d.in_band === false ? '⚠出带' : d.in_band === true ? '✓带内' : ''}`}</td></tr>`).join('');
+      : `${d.l2}${d.unit ? ' ' + d.unit : ''} ${d.in_band === false ? '出带' : d.in_band === true ? '带内' : ''}`}</td></tr>`).join('');
 }
 
 $('#liveClear').onclick = () => { LIVE.rows = []; renderLiveRows(); };
