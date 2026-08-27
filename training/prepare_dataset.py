@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -158,13 +159,182 @@ def cmd_to_yolo(out: Path) -> int:
     return 0
 
 
+
+# ================================================================== 分割标注
+#
+# **公开数据里只有 PaddleX 那一份给了像素级的指针标注**，所以分割那一路应当
+# 以它为主、合成掩膜做增广，而不是反过来。第一版只写了合成那条路，等于把
+# 唯一一份真实像素标注晾在外面——这正是"查了开源数据集却没接进来"。
+#
+# 两边的类别对不齐，这是接的时候唯一要动脑子的地方：
+#
+#     本项目   background(0) · face(1) · needle(2) · ticks(3)
+#     PaddleX  background(0) · pointer(1) · scale(2)
+#
+# PaddleX **没有盘面这一类**。它的图是表盘的紧裁剪，所以那些"背景"像素其实
+# 大部分就是盘面——但边角又确实是真背景，分不开。硬映射成任何一类都是在教
+# 模型一件错事，所以默认映射成 255（忽略）：这些像素不进损失函数。
+#
+# 这样分工是清楚的：**针与刻度的区分从真实数据学**（这正是合成数据训出来
+# 最弱的一环，实测针的 IoU 只有 0.182），**盘面与背景的区分从合成数据学**
+# （合成数据在这一维上标得毫无争议）。
+IGNORE = 255
+_PADDLEX_MAP = {0: IGNORE, 1: 2, 2: 3}          # 见上：0 默认忽略
+_BG_CHOICES = {"ignore": IGNORE, "face": 1, "background": 0}
+_IMG_EXT = (".jpg", ".jpeg", ".png", ".bmp")
+#: 标注可能放在这些同级目录里。PaddleX 各版本的目录名不完全一致，而我这边
+#: 的网络出口下不到原始包，没法钉死一种——所以按常见约定逐个试，并把**实际
+#: 找到的是哪一种**打印出来，让人一眼能核对。
+_ANN_DIRS = ("annotations", "annotation", "masks", "labels", "gt", "SegmentationClass")
+
+
+def _find_pairs(root: Path) -> list[tuple[Path, Path]]:
+    """在 PaddleX 解出来的目录里配对 (图, 标注)。
+
+    不写死目录结构：先收集所有图，再按 stem 去几个常见的标注目录里找同名
+    文件。找不到的如实跳过并计数，**不静默丢弃**——数量对不上时人得知道。
+    """
+    imgs: list[Path] = []
+    for ext in _IMG_EXT:
+        imgs += [q for q in root.rglob("*" + ext)
+                 if not any(d in q.parts for d in _ANN_DIRS)]
+    pairs = []
+    for im in sorted(set(imgs)):
+        ann = None
+        for d in _ANN_DIRS:
+            for ext in (".png", ".bmp"):
+                for cand in (im.parent.parent / d / (im.stem + ext),
+                             im.parent / d / (im.stem + ext),
+                             root / d / (im.stem + ext)):
+                    if cand.exists():
+                        ann = cand
+                        break
+                if ann:
+                    break
+            if ann:
+                break
+        if ann is not None:
+            pairs.append((im, ann))
+    return pairs
+
+
+def cmd_from_paddlex(src: Path, out: Path, *, background: str = "ignore",
+                     val_frac: float = 0.15, seed: int = 0) -> int:
+    """把 PaddleX 分割集转成 train_segmenter.py 直接能吃的目录结构。
+
+    产物与 `gen_synthetic.py` 完全一致（images/ masks/ labels/ 三件套），
+    所以两份数据可以直接合在一起训——这正是想要的：真实数据教"针 vs 刻度"，
+    合成数据补密度分层与盘面标注。
+    """
+    import random
+
+    import cv2
+    import numpy as np
+
+    if not src.exists():
+        print("目录不存在：%s" % src)
+        print("先下载：见 --list 里 paddlex_meter 那一条")
+        return 2
+    bg = _BG_CHOICES.get(str(background).lower())
+    if bg is None:
+        print("--background 只能是 %s" % "/".join(_BG_CHOICES))
+        return 2
+    pairs = _find_pairs(src)
+    if not pairs:
+        print("在 %s 下没找到成对的 图/标注。" % src)
+        print("找过这些标注目录名：%s" % "、".join(_ANN_DIRS))
+        print("如果 PaddleX 的目录名不在其中，把标注目录改名成 annotations/ 再跑。")
+        return 2
+
+    for d in ("images/train", "images/val", "masks/train", "masks/val",
+              "labels/train", "labels/val", "check"):
+        (out / d).mkdir(parents=True, exist_ok=True)
+    rng = random.Random(seed)
+    seen: Counter = Counter()
+    n_ok = n_bad = 0
+    for im_p, ann_p in pairs:
+        img = cv2.imread(str(im_p))
+        ann = cv2.imread(str(ann_p), cv2.IMREAD_UNCHANGED)
+        if img is None or ann is None:
+            n_bad += 1
+            continue
+        if ann.ndim == 3:
+            ann = ann[:, :, 0]
+        if ann.shape[:2] != img.shape[:2]:
+            n_bad += 1
+            continue
+        vals = set(int(v) for v in np.unique(ann))
+        seen.update(vals)
+        if not vals <= set(_PADDLEX_MAP):
+            # 不是 {0,1,2} 的索引图（可能是调色板或 0/128/255 的可视化图），
+            # 硬转会得到一份看起来正常、其实类别全错的标注。宁可跳过并报数。
+            n_bad += 1
+            continue
+        m = np.full(ann.shape, bg, np.uint8)
+        m[ann == 1] = _PADDLEX_MAP[1]
+        m[ann == 2] = _PADDLEX_MAP[2]
+        if bg is IGNORE:
+            m[ann == 0] = IGNORE
+        split = "val" if rng.random() < val_frac else "train"
+        stem = "paddlex_" + im_p.stem
+        cv2.imwrite(str(out / "images" / split / (stem + ".jpg")), img)
+        cv2.imwrite(str(out / "masks" / split / (stem + ".png")), m)
+        # PaddleX 的图本来就是单块表的紧裁剪，所以检测框就是整张图。
+        # crops_of() 靠它切 ROI，缺了这个文件整帧都会被跳过。
+        (out / "labels" / split / (stem + ".txt")).write_text(
+            "0 0.5 0.5 1.0 1.0\n", encoding="utf-8")
+        if n_ok < 8:
+            _seg_check(out / "check" / (stem + ".jpg"), img, m)
+        n_ok += 1
+
+    (out / "README.txt").write_text(
+        "由 PaddleX 分割集转换而来：%s\n"
+        "类别 0=background 1=face 2=needle 3=ticks 255=ignore\n"
+        "PaddleX 无盘面标注，其 background 映射为 %s\n"
+        % (src.resolve(), background), encoding="utf-8")
+    print("转换 %d 张（跳过 %d 张）→ %s" % (n_ok, n_bad, out))
+    print("原始标注里出现过的取值：%s" % dict(sorted(seen.items())))
+    if n_bad:
+        print("跳过的多半是调色板 PNG 或尺寸对不上的。取值不是 {0,1,2} 时"
+              "一律不转——硬转会得到一份看起来正常、类别全错的标注。")
+    print("**务必人眼看几张 %s/check/**：掩膜错位在任何数字上都看不出来，"
+          "只有画出来才看得见。" % out)
+    print("接着训：python -m training.train_segmenter --data %s" % out)
+    return 0 if n_ok else 2
+
+
+def _seg_check(path: Path, img, m) -> None:
+    """把标注画回图上。和 gen_synthetic.draw_check 同一个用意与同一套配色。"""
+    import cv2
+    import numpy as np
+    color = img.copy()
+    color[m == 1] = (90, 140, 60)
+    color[m == 2] = (60, 60, 235)
+    color[m == 3] = (200, 160, 60)
+    out = cv2.addWeighted(img, 0.45, color, 0.55, 0)
+    out[m == IGNORE] = (out[m == IGNORE] * 0.55).astype(np.uint8)   # 忽略区压暗
+    cv2.imwrite(str(path), out)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="公开数据集获取与整理")
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--to-yolo", action="store_true")
+    ap.add_argument("--from-paddlex", default=None, metavar="DIR",
+                    help="把 PaddleX 分割集转成 train_segmenter 能吃的结构")
+    ap.add_argument("--background", default="ignore",
+                    choices=sorted(_BG_CHOICES),
+                    help="PaddleX 的 background 映射成什么（默认忽略，不进损失）")
+    ap.add_argument("--val-frac", type=float, default=0.15)
+    ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default=str(DATA / "yolo"))
     a = ap.parse_args()
+    if a.from_paddlex:
+        out = Path(a.out if a.out != str(DATA / "yolo") else DATA / "seg_paddlex")
+        return cmd_from_paddlex(Path(a.from_paddlex), out,
+                                background=a.background, val_frac=a.val_frac,
+                                seed=a.seed)
     if a.list:
         return cmd_list()
     if a.check:

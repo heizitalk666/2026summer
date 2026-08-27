@@ -189,10 +189,26 @@ def test_status_before_any_frame_raises_not_ready(tmp_path):
 
 
 def test_set_pose_actually_moves_the_gimbal(rig):
+    """**等的条件必须就是断言的条件，而且"到位"要连目标一起看。**
+
+    这条用例踩了两次，两次都是等待条件写得比断言松：
+
+    1. 先等 |pan − 90| < 0.5、再断言 at_target。0.5° 这个窗口比云台自己的
+       到位判据更松，实测 pan = 89.52 时等待就通过了，而云台还在 moving。
+    2. 改成只等 at_target。可刚发出 set_pose 的那一瞬间云台还没开始动，
+       位姿帧报的是**上一个目标**的"已到位"——于是在 pan = 0 就通过了。
+       这正是 test_poll_does_not_trust_a_stale_at_target 记录的同一个陷阱，
+       驱动侧靠 _pose_matches() 防它，用例这边也得防。
+
+    所以等的就是"到位**且**落在本条指令的目标上"，和驱动的判据一致。
+    """
     assert rig.wait(lambda: rig.ptz.status() is not None)
     rig.ptz.set_pose(90.0, 2.0, 1.0, PTZSpeed.NORMAL)
-    assert rig.wait(lambda: abs(rig.ptz.status().pan_deg - 90.0) < 0.5, 4.0)
-    assert rig.ptz.status().at_target
+    arrived = lambda: (rig.ptz.status().at_target                    # noqa: E731
+                       and abs(rig.ptz.status().pan_deg - 90.0) <= 0.5)
+    assert rig.wait(arrived, 4.0), \
+        "4 s 内没有转到位，当前 pan=%.2f at_target=%s" % (
+            rig.ptz.status().pan_deg, rig.ptz.status().at_target)
 
 
 def test_hfov_narrows_with_zoom(rig):
