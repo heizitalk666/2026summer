@@ -41,6 +41,7 @@ from patrol.perception.quality import evaluate as eval_quality
 from patrol.perception.segment.base import build_segmenter
 from patrol.perception.reading.indicator import read_indicator_light
 from patrol.perception.reading.pointer import read_pointer_gauge, reading_to_l2
+from patrol.perception.reading.scale import wrap180
 from patrol.perception.reading.nameplate import (cross_check_dial,
                                                  parse_dial_text,
                                                  read_digital_value,
@@ -131,6 +132,14 @@ class PerceptionNode:
         #: 触发这次复核时（巡航期）的检测置信度。融合层要拿它算
         #: "复核有没有把置信度打下去"，而复核期这一帧只看得到复核后的值。
         self._event_conf_before = 0.0
+        #: 这次复核状态机会把变焦拉到多少倍，用它判断 ZOOM 走完了没有。
+        #: 见 verify_due() / _zoom_settled()。
+        self._event_target_zoom = 0.0
+        #: "只差倍率没到位"这个状态是从什么时候开始连续保持的。见 verify_due()
+        #: 末尾的兜底。0 表示当前不处于这个状态。
+        self._verify_ready_since_ns = 0
+        self.verify_grace_s = float(
+            cfg.get("perception.verify_grace_s", 1.5))
         # event_id 的兜底寿命。正常路径由 verify_due() 那一支释放，但 FSM 一旦
         # ABORT，verify_due() 永远不成立，主键就会被盖到之后每一帧上（实测从
         # t=3 s 一直盖到 t=150 s），uploader 把毫不相干的检出粘到同一个证据包，
@@ -146,8 +155,15 @@ class PerceptionNode:
         self.burst_n = int(cap.get("burst_n", 3))
         self.burst_interval_ms = int(cap.get("burst_interval_ms", 150))
         self.highlight_trigger = float(cap.get("highlight_trigger", 0.12))
-        self.verify_zoom_min = float(cap.get("verify_zoom_min", 1.8))
         self.cruise_zoom = float(cfg.get("mission.cruise_ptz.zoom", 1.0))
+        self.max_zoom = float(cfg.get("optics.max_zoom", 3.0))
+        # 巡航姿态：云台盯着柜列。车沿过道往返，所以指向有两个（±bearing）。
+        # verify_due() 拿它判断"云台有没有离开巡航姿态"，见那里的说明。
+        _bearing = float(cfg.get("mission.cruise_ptz.look_map_bearing_deg", 90.0))
+        self.cruise_pans = (_bearing, -_bearing)
+        self.cruise_tilt = float(cfg.get("mission.cruise_ptz.tilt_deg", 2.0))
+        self.cruise_pose_tol_deg = float(
+            cfg.get("mission.cruise_ptz.retarget_deg", 12.0))
         # perception 是唯一持有相机的节点，所以证据图像由它落盘；
         # uploader 订阅 IF-1 配对 before/after 后组装 manifest。
         from pathlib import Path
@@ -255,6 +271,29 @@ class PerceptionNode:
             return None
         t = world.by_id(det.source_target_id)
         return t.priors if t is not None else None
+
+    def _expected_zoom(self, best_suspect, entries: list[dict],
+                       cur_zoom: float) -> float:
+        """这次复核状态机会把变焦拉到多少倍。
+
+        用的是和 `mission/fsm.py` 完全相同的一行：
+
+            zoom_for_density(当前倍率, 触发时的像素密度, p_target, max_zoom)
+
+        而且 `p` 取的就是 perception 自己刚写进 IF-1 的那个
+        `pixel_density_px`——状态机读到的也是这一个数，所以两边算出来逐位
+        相同。**这一点是必须的**：perception 靠这个值判断 ZOOM 走完没有，
+        差一点就会早触发一拍，而早触发一拍就等于把整次复核废掉
+        （verify_due 一命中就立刻发报文并清掉 event_id）。
+        """
+        from patrol.scene.optics import zoom_for_density
+        if best_suspect is None:
+            return float(self.max_zoom)
+        tid = max(0, int(best_suspect[1].track_id))
+        p = next((float(e["pixel_density_px"]) for e in entries
+                  if int(e["track_id"]) == tid), 0.0)
+        return float(zoom_for_density(float(cur_zoom), p, self.p_min,
+                                      self.max_zoom))
 
     # ------------------------------------------------------------ OCR 互证
     def _l2_ocr(self, image, det: Detection, l2: dict | None,
@@ -428,6 +467,23 @@ class PerceptionNode:
         cruising = st is None or (
             st["chassis"]["state"] == "MOVING"
             and float(st["ptz"]["zoom"]) <= self.cruise_zoom * 1.10 + 0.01)
+        # **期望倍率要跟着巡航观测走，不能只在铸主键时记一次。**
+        #
+        # 复核可以重试：第一次因对焦失败 ABORT 之后 event_id 是保留的
+        # （同一个可疑目标，同一个主键），状态机会在车又开近一点之后重来一次。
+        # 而它每次都重新算 target_zoom——车近了，需要的倍率就小了。perception
+        # 若还攥着第一次那个更大的值去比，第二次永远比不过，VERIFY 干等到超时。
+        # 实测：第一次 ABORT 于 t=7.6 s，第二次 t=17.0 s 重试时状态机算的是
+        # 2.010×，而 perception 还在等第一次那个更大的数。
+        #
+        # **对齐的时机是"发出 is_suspect=true 的那一帧"，不是"任何巡航帧"。**
+        # 状态机就是拿这条报文里的密度去算 target_zoom 的，所以两边逐位相同。
+        # 而被抑制的帧（RESUME_SILENCE / WAYPOINT_ONCE）状态机根本不理，
+        # 拿它们刷新会把期望值改成一个状态机从未用过的数——实测就是这么把
+        # 期望倍率刷成 1.0 的：复核刚结束、车贴着目标继续走的那几帧密度很高，
+        # 算出来的期望倍率自然接近 1.0，下一次复核于是在 AIM 阶段就误命中。
+        if suspect["is_suspect"]:
+            self._event_target_zoom = self._expected_zoom(best_suspect, out, zoom)
         if suspect["is_suspect"] and self.event_id is None:
             if cruising:
                 self.event_id = new_uuid()
@@ -545,21 +601,107 @@ class PerceptionNode:
         gateway，perception 收不到。
 
         在冻结的接口内可行的判据是看 IF-3 的状态组合：
-        底盘停稳 + 变焦拉起来了 + 云台到位 + 对焦锁定。这四条同时成立只在
-        复核时发生（巡航态车在动、变焦在广角端），所以用它作为复核时刻的
-        判据是可靠的。
+        底盘停稳 + 云台离开巡航姿态 + 云台到位 + 对焦锁定。这四条同时成立
+        只在复核时发生（巡航态车在动、云台盯着柜列、变焦在广角端）。
 
-        这条属于"实现时绕过去了、但接口该补"的情况，已记入差异清单待评审：
+        **"离开巡航姿态"不能写成"变焦 ≥ 某个固定值"。**原来这里比的是
+        `verify_zoom_min = 1.8`，而状态机下发的变焦是按需算出来的：
+
+            target_zoom = clip(p_target / p_before, 1, max_zoom)
+
+        两个常数是各自独立定的，凑在一起就锁死了：p_target = 120 px 时，
+        只有 p_before ≤ 120/1.8 = 66.7 px 的目标才会被放大到 1.8× 以上。
+        **巡航期像素密度超过 66.7 px 的目标，复核 100 % 会在 VERIFY 超时**
+        ——状态机一路走到 VERIFY 干等，perception 压根不知道该发报文。
+
+        这个失效模式格外恶劣：目标离得越近、看得越清楚，复核越是必然失败，
+        而且全程没有任何报错，只在证据包里留下一个 density_ratio = 0 的
+        INCONCLUSIVE。实测一轮 7 个证据包里中一个（target_zoom = 1.493）。
+
+        所以判据改成"相对巡航姿态"：变焦抬起来了**或**云台指向偏离了巡航
+        指向。两者取或是必要的——目标已经够大时 target_zoom 会等于 1.0，
+        变焦这一维根本不动，只剩指向能区分。
+
+        这条仍属于"实现时绕过去了、但接口该补"的情况，已记入差异清单待评审：
         建议 IF-3 的 watchdog 块增补一个可选的 mission_state 字段，由网关
-        从心跳里透传，这样 perception 就不用靠状态组合去猜。
+        从心跳里透传，这样 perception 就不用靠状态组合去猜。在那之前，
+        上面这个相对判据是冻结接口内能做到的最稳的版本。
         """
         st = self._last_status
         if st is None:
+            self._verify_ready_since_ns = 0
             return False
-        return (st["chassis"]["state"] == "STOPPED"
-                and float(st["ptz"]["zoom"]) >= self.verify_zoom_min
-                and bool(st["ptz"]["at_target"])
-                and st["ptz"]["focus_state"] == "LOCKED")
+        parked = (st["chassis"]["state"] == "STOPPED"
+                  and bool(st["ptz"]["at_target"])
+                  and st["ptz"]["focus_state"] == "LOCKED"
+                  and self._ptz_left_cruise_pose(st["ptz"]))
+        if not parked:
+            self._verify_ready_since_ns = 0
+            return False
+        if self._zoom_settled(st["ptz"]):
+            self._verify_ready_since_ns = 0
+            return True
+
+        # ---- 兜底 ----
+        #
+        # 上面四条无歧义的条件全都成立、只有倍率对不上，而且这个状态**稳定
+        # 保持**了一段时间——除了"状态机停在 VERIFY 等报文"，系统不会这样干坐着。
+        #
+        # 这条兜底是被两次事故逼出来的（一次判据偏严、一次偏松，见
+        # tests/test_verify_due.py）。它们的共同点不是判据写错，而是**错了之后
+        # 没有任何征兆**：状态机干等到超时，证据包留下一个 density_ratio = 0 的
+        # INCONCLUSIVE，日志里一行报错都没有。所以这里宁可发一份倍率没完全到位
+        # 的复核报文，也要把这件事**变成一条 WARN**——复核质量差一点是可以在
+        # 证据包里看出来的，而静默失效看不出来。
+        now = mono_ns()
+        if self._verify_ready_since_ns == 0:
+            self._verify_ready_since_ns = now
+            return False
+        if (now - self._verify_ready_since_ns) / 1e9 < self.verify_grace_s:
+            return False
+        self.log.warn("变焦未达期望值就发复核报文（兜底）",
+                      want=round(float(self._event_target_zoom), 3),
+                      got=round(float(st["ptz"]["zoom"]), 3),
+                      held_s=round((now - self._verify_ready_since_ns) / 1e9, 2))
+        self._verify_ready_since_ns = 0
+        return True
+
+    def _zoom_settled(self, ptz: dict) -> bool:
+        """变焦有没有拉到这次复核该到的位置。
+
+        **不能只看"云台离开了巡航姿态"。**AIM 的第一步就是一条
+        `PTZ_SET(pan=目标方位, zoom=1.00)` 的前馈粗对准——那一刻底盘停着、
+        云台到位、对焦锁定、指向也早就偏离巡航姿态了，四条全中。于是
+        verify_due() 会在 AIM 刚结束、ZOOM 还没开始时命中，而它一命中就立刻
+        发复核报文并清掉 event_id：整次复核就此作废，证据包里留下一个
+        density_ratio ≈ 1.0 的空壳。实测密度比 1.07，等于什么都没复核。
+
+        所以拿期望倍率比：`_event_target_zoom` 是铸主键时用状态机同一个公式
+        算出来的。留 5 % 余量是给云台的稳态误差（stub 有 settle_jitter）。
+        """
+        want = float(getattr(self, "_event_target_zoom", 0.0) or 0.0)
+        if want <= 0.0:
+            # 没记到期望值（例如 event_id 是别处来的），退回"明显高于巡航端"
+            return float(ptz["zoom"]) > self.cruise_zoom * 1.10 + 0.01
+        return float(ptz["zoom"]) >= want * 0.95
+
+    def _ptz_left_cruise_pose(self, ptz: dict) -> bool:
+        """云台是不是已经离开巡航姿态。
+
+        这一条是给"目标已经够大、状态机算出来根本不用变焦"那种情况兜底的：
+        那时 `_zoom_settled` 恒为真（期望倍率就是 1.0），只剩指向能区分
+        "在复核"和"车停在路尽头、云台还盯着柜列"。
+
+        容差取 `mission.cruise_ptz.retarget_deg`（默认 12°）：巡航期云台就是
+        按这个粒度重新对准柜列的，比它小的偏差属于巡航态的正常抖动。
+        """
+        if float(ptz["zoom"]) > self.cruise_zoom * 1.10 + 0.01:
+            return True
+        pan, tilt = float(ptz["pan_deg"]), float(ptz["tilt_deg"])
+        # 巡航指向有两个：车头朝东看 +90°、掉头朝西看 -90°，取最近的一个比
+        d_pan = min(abs(wrap180(pan - b)) for b in self.cruise_pans)
+        d_tilt = abs(tilt - self.cruise_tilt)
+        return d_pan > self.cruise_pose_tol_deg or d_tilt > self.cruise_pose_tol_deg
 
     def _evidence_dir(self, event_id: str):
         d = self.evidence_root / self.run_id / event_id
@@ -641,6 +783,7 @@ class PerceptionNode:
         self.event_id = None
         self._event_started_ns = 0
         self._event_conf_before = 0.0
+        self._event_target_zoom = 0.0
         set_context(event_id=None)
 
     def _expire_event(self) -> None:
