@@ -37,6 +37,7 @@ import cv2
 import numpy as np
 
 from patrol.common import messages as M
+from patrol.perception.fusion import Evidence, fuse
 from patrol.common.clock import utc_ms
 
 ROLE_BY_PREFIX = {
@@ -261,48 +262,31 @@ def _empty_snapshot() -> dict:
 
 
 def decide_verdict(after_l2: dict | None, *, before_conf: float, after_conf: float,
-                   defect_class: str | None, is_anomaly: bool,
-                   aborted: bool) -> dict:
+                   defect_class: str | None, is_anomaly: bool, aborted: bool,
+                   fusion: dict | None = None) -> dict:
     """复核结论。ICD §6.3。
 
-    **FALSE_ALARM 是有价值的结论，不是失败。**一级为了保召回把阈值压到
-    0.25，必然带来误报，复核把它们消解掉正是这套方案的立论所在。误报被
-    复核否掉并记录下来，这条数据回流到训练集，下一轮一级模型在这类背景上
-    的误报率就会下降。
+    **仲裁规则只有一份，住在 patrol/perception/fusion.py。**这里是它的薄封装：
+    打包器只拿得到证据包快照里的那几个字段，而感知在复核当时拿得到全部四路
+    证据（含 OCR 互证）。所以：
+
+    - 感知随 IF-1 把融合结果带过来时（`fusion` 非空），**直接用它**——它是
+      在证据最全的时刻算的
+    - 拿不到时（旧数据回放、感知没开 OCR），用手头这几个字段现算一遍。同一个
+      `fuse()`，同一套规则，只是证据少一路，结论自然更保守
+
+    两条路共用一份规则，是为了避免"云端看到的结论"和"车上算出的结论"哪天
+    悄悄分叉——那种不一致查起来极其痛苦，而且没有任何征兆。
     """
-    if aborted:
-        return {"result": "INCONCLUSIVE", "defect_class": defect_class,
-                "severity": "INFO", "needs_human_review": True,
-                "confidence": float(np.clip(after_conf, 0, 1))}
-    # **有二级读数时以读数为准，L3 排在它后面。**L3 是非监督的，只学过
-    # "看起来正常"的样本，对一块读数明确、且落在正常带内的表计报异常，多半
-    # 是光照或视角变化引起的重构误差。把它排在读数前面的后果实测过：一整轮
-    # 里压力表全被判成 UNKNOWN_ANOMALY，读数通路等于白做。
-    # 但 L3 的意见不丢——读数正常而 L3 报异常时置 needs_human_review。
-    # 这也符合 ICD §3.1「L3 输出只允许进人工复核队列，不得直接告警」。
-    if after_l2 is not None and after_l2.get("value") is not None:
-        band = after_l2.get("in_normal_band")
-        if band is False:
-            return {"result": "READING_ABNORMAL", "defect_class": defect_class,
-                    "severity": "WARN", "needs_human_review": False,
-                    "confidence": float(np.clip(after_conf, 0, 1))}
-        if band is True:
-            return {"result": "READING_OK", "defect_class": defect_class,
-                    "severity": "INFO", "needs_human_review": bool(is_anomaly),
-                    "confidence": float(np.clip(after_conf, 0, 1))}
-    if is_anomaly:
-        return {"result": "UNKNOWN_ANOMALY", "defect_class": None,
-                "severity": "WARN", "needs_human_review": True,
-                "confidence": float(np.clip(after_conf, 0, 1))}
-    if after_conf >= 0.60:
-        return {"result": "CONFIRMED_DEFECT", "defect_class": defect_class,
-                "severity": "CRITICAL" if after_conf >= 0.85 else "WARN",
-                "needs_human_review": False,
-                "confidence": float(np.clip(after_conf, 0, 1))}
-    if after_conf < before_conf * 0.6:
-        return {"result": "FALSE_ALARM", "defect_class": None, "severity": "INFO",
-                "needs_human_review": False,
-                "confidence": float(np.clip(after_conf, 0, 1))}
-    return {"result": "INCONCLUSIVE", "defect_class": defect_class,
-            "severity": "INFO", "needs_human_review": True,
-            "confidence": float(np.clip(after_conf, 0, 1))}
+    if fusion:
+        keep = ("result", "defect_class", "severity", "needs_human_review",
+                "confidence")
+        v = {k: fusion[k] for k in keep if k in fusion}
+        if set(v) == set(keep):
+            v["confidence"] = float(np.clip(v["confidence"], 0.0, 1.0))
+            return v
+    return fuse(Evidence(
+        defect_class=defect_class,
+        conf_before=float(before_conf), conf_after=float(after_conf),
+        l2=after_l2, is_anomaly=bool(is_anomaly), aborted=bool(aborted),
+    )).verdict()

@@ -17,6 +17,7 @@ mission 之间不经过网关，因为二者都不产生执行器动作。
 from __future__ import annotations
 
 import argparse
+import json
 import signal
 import sys
 import time
@@ -34,9 +35,15 @@ from patrol.drivers.factory import build_drivers
 from patrol.perception.anomaly import build_anomaly
 from patrol.perception.detector.base import Detection, build_detector
 from patrol.perception.detector.synthetic import CLASS_SIZE_M
+from patrol.perception.fusion import Evidence, fuse
+from patrol.perception.ocr.base import build_ocr
 from patrol.perception.quality import evaluate as eval_quality
 from patrol.perception.reading.indicator import read_indicator_light
 from patrol.perception.reading.pointer import read_pointer_gauge, reading_to_l2
+from patrol.perception.reading.nameplate import (cross_check_dial,
+                                                 parse_dial_text,
+                                                 read_digital_value,
+                                                 read_switch_text)
 from patrol.perception.reading.switch import read_switch_position
 from patrol.perception.tracker import IouTracker
 from patrol.scene.optics import pixel_density
@@ -94,6 +101,16 @@ class PerceptionNode:
             iou_threshold=float(cfg.get("perception.tracker.iou_threshold", 0.3)),
             max_age=int(cfg.get("perception.tracker.max_age_frames", 15)))
         self.anomaly = build_anomaly(cfg)
+        # 第四个模型：OCR。它只在复核期跑（见 ocr/rapid.py 的耗时说明），
+        # 装不上时 build_ocr 返回 DisabledOcr，互证通路降级但链路不断。
+        self.ocr = build_ocr(cfg)
+        if not self.ocr.available:
+            self.log.warn("OCR 互证通路未启用",
+                          detail=str(self.ocr.model_info().get("reason", "")))
+        else:
+            self.log.info("OCR 互证通路就绪", **{
+                k: v for k, v in self.ocr.model_info().items()
+                if k in ("name", "backend", "offline")})
 
         self.pub = Publisher(cfg.get("bus.detection"))
         self.status_sub = Subscriber(cfg.get("bus.status"), topics=["STATUS_REPORT"])
@@ -101,6 +118,9 @@ class PerceptionNode:
         self.run_id = "00000000-000000-0000"
         self.event_id: str | None = None
         self._event_started_ns = 0
+        #: 触发这次复核时（巡航期）的检测置信度。融合层要拿它算
+        #: "复核有没有把置信度打下去"，而复核期这一帧只看得到复核后的值。
+        self._event_conf_before = 0.0
         # event_id 的兜底寿命。正常路径由 verify_due() 那一支释放，但 FSM 一旦
         # ABORT，verify_due() 永远不成立，主键就会被盖到之后每一帧上（实测从
         # t=3 s 一直盖到 t=150 s），uploader 把毫不相干的检出粘到同一个证据包，
@@ -225,6 +245,89 @@ class PerceptionNode:
         t = world.by_id(det.source_target_id)
         return t.priors if t is not None else None
 
+    # ------------------------------------------------------------ OCR 互证
+    def _l2_ocr(self, image, det: Detection, l2: dict | None,
+                priors: dict | None) -> dict | None:
+        """第二条读数通路：读表面印着的字，和标定先验对质。
+
+        **只在复核期跑。**巡航期 30 Hz 的预算里塞不下 0.3 s 的 OCR，也没有
+        意义：5 m 处 1× 时表盘只有约 50 px，上面的刻度数字连轮廓都不成形。
+        这条约束和"变焦到 120 px 才谈读数精度"是同一件事的两面——字读不出来
+        和针量不准，受制于同一个像素密度。
+
+        返回 None 表示这一路缺席（引擎没装、ROI 太小、一个字都没读到），
+        融合层会据此把结论调保守，而不是当作"没问题"。
+        """
+        if not self.ocr.available or l2 is None:
+            return None
+        kind = l2.get("kind")
+        lines = self.ocr.read(image, det.bbox)
+        if not lines:
+            return None
+        out: dict = {"lines": [{"text": ln.text, "conf": round(ln.conf, 3),
+                                "bbox": [round(v, 1) for v in ln.bbox]}
+                               for ln in lines]}
+        if kind == "POINTER_GAUGE":
+            dial = parse_dial_text(lines)
+            n_labels = int(self.cfg.get("perception.ocr.dial_labels", 5))
+            cross = cross_check_dial(dial, priors, n_labels=n_labels)
+            out["dial"] = dial.as_dict()
+            out["cross_check"] = cross.as_dict()
+            out["_cross"] = cross
+        elif kind == "SWITCH_POSITION":
+            state, conf = read_switch_text(lines)
+            out["state"], out["state_conf"] = state, round(float(conf), 3)
+        elif kind == "DIGITAL_DISPLAY":
+            value, conf = read_digital_value(lines)
+            out["value"], out["value_conf"] = value, round(float(conf), 3)
+        return out
+
+    # ------------------------------------------------------------ 融合
+    def _fuse(self, entry: dict, ocr: dict | None, l3: dict | None) -> dict:
+        """把四路证据交给仲裁层，返回可写盘的结果。
+
+        融合在**感知**这一侧算，因为只有这里同时拿得到四路模型的原始输出：
+        IF-1 的 Schema 是 additionalProperties: false，OCR 的原文和互证结论
+        塞不进去。结果经证据目录（ICD §6.1"目录即契约"）交给 uploader，
+        规则本身两边共用 fusion.fuse()，不会分叉。
+        """
+        o = ocr or {}
+        ev = Evidence(
+            defect_class=entry["defect_class"],
+            conf_before=float(self._event_conf_before),
+            conf_after=float(entry["confidence"]),
+            l2=entry.get("l2_reading"),
+            cross=o.get("_cross"),
+            ocr_state=o.get("state"),
+            ocr_value=o.get("value"),
+            ocr_conf=float(o.get("state_conf", o.get("value_conf", 0.0)) or 0.0),
+            anomaly_score=(None if l3 is None else l3.get("anomaly_score")),
+            is_anomaly=bool((l3 or {}).get("is_anomaly")),
+            pixel_density_px=float(entry["pixel_density_px"]),
+            density_target_px=float(self.p_min),
+            quality_score=(entry.get("quality") or {}).get("score"),
+            aborted=False)
+        return fuse(ev).as_dict()
+
+    def _dump_fusion(self, per_track: dict) -> None:
+        """把融合结果写进 <run_id>/<event_id>/fusion.json，供 uploader 合并。
+
+        按 track_id 分桶而不是只写一个"最佳"：状态机是按 track_id 锁定复核
+        目标的，uploader 从 mission_ctx.json 拿到的也是 track_id。写死一个
+        "最佳"的话，画面里同时有两块表时会挑错那一块——实测过一次复核期间
+        两块同类表都在框里的情况。
+        """
+        if not self.event_id or not per_track:
+            return
+        d = self.evidence_root / self.run_id / self.event_id
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "fusion.json").write_text(
+                json.dumps({"event_id": self.event_id, "by_track": per_track},
+                           ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as e:
+            self.log.warn("fusion 落盘失败", detail=str(e))
+
     # ------------------------------------------------------------ 一帧
     def process_frame(self, frame, *, stage: str = "CRUISE") -> dict:
         t_cap = frame.ts_mono_ns
@@ -241,6 +344,9 @@ class PerceptionNode:
 
         out: list[dict] = []
         best_suspect: tuple[float, Detection, str] | None = None
+        # 复核期才跑 OCR 与融合：巡航期没有预算，也没有可读的字（见 _l2_ocr）
+        heavy = (stage == "VERIFY")
+        ocr_by_track: dict[int, dict] = {}
         for d in dets:
             dist = float(d.extra.get("distance_m", 5.0))
             size_m = float(d.extra.get("target_size_m",
@@ -266,6 +372,10 @@ class PerceptionNode:
                                  zoom=zoom, distance_m=dist,
                                  hfov_at_1x_deg=self.hfov1x, cfg_quality=self.qcfg)
                 entry["quality"] = q.as_dict()
+            if heavy:
+                o = self._l2_ocr(frame.image, d, l2, priors)
+                if o is not None:
+                    ocr_by_track[max(0, int(d.track_id))] = o
             out.append(entry)
 
             rule = self._trigger_rule(d, p, l2, entry.get("quality"))
@@ -276,6 +386,18 @@ class PerceptionNode:
                     best_suspect = (prio, d, rule)
 
         l3 = self._run_l3(frame, dets)
+        if heavy:
+            # 四路证据到齐，交给仲裁层。逐条 track 各算一份——状态机锁的是
+            # track_id，写死"最佳"那一个会在画面里有两块同类表时挑错。
+            fused = {}
+            for e in out:
+                tid = int(e["track_id"])
+                o = ocr_by_track.get(tid)
+                fused[str(tid)] = self._fuse(e, o, l3)
+                if o is not None:
+                    o.pop("_cross", None)           # CrossCheck 对象不可 JSON 化
+                    fused[str(tid)]["evidence"]["l2_ocr"]["raw"] = o
+            self._dump_fusion(fused)
         if l3 is not None and l3["is_anomaly"] and best_suspect is None and dets:
             d0 = dets[0]
             best_suspect = (SEVERITY.get(d0.defect_class, 0.5) * 0.5, d0, "L3_ANOMALY")
@@ -299,6 +421,8 @@ class PerceptionNode:
             if cruising:
                 self.event_id = new_uuid()
                 self._event_started_ns = mono_ns()
+                self._event_conf_before = float(
+                    best_suspect[1].confidence if best_suspect else 0.0)
                 set_context(event_id=self.event_id)
             else:
                 # 拿不到主键就不能报 is_suspect——Schema 规定 is_suspect=true
@@ -505,6 +629,7 @@ class PerceptionNode:
     def _clear_event(self) -> None:
         self.event_id = None
         self._event_started_ns = 0
+        self._event_conf_before = 0.0
         set_context(event_id=None)
 
     def _expire_event(self) -> None:

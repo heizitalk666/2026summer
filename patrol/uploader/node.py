@@ -149,8 +149,48 @@ class UploaderNode:
         p.waypoint_id = m.get("waypoint_id") or p.waypoint_id
         p.defect_class = m.get("defect_class") or p.defect_class
 
+    def _merge_fusion(self, p: _Pending) -> dict | None:
+        """取感知在复核当时算好的融合结论。
+
+        融合必须在感知那一侧算——四路证据里 OCR 的原文与互证结论进不了 IF-1
+        （Schema 是 additionalProperties: false）。所以走的还是证据目录这条
+        契约（ICD §6.1），和 mission_ctx.json 同一个办法。
+
+        **按 track_id 取，不取"第一个"。**复核目标是状态机按 track_id 锁定的，
+        mission_ctx.json 里记着它；画面里同时有两块同类表时，取错 track 就会
+        把另一块表的结论写进这个证据包。取不到就返回 None，由 decide_verdict
+        用手头字段现算一份更保守的。
+        """
+        d = Path(self.packer.root) / self.run_id / p.event_id
+        try:
+            f = json.loads((d / "fusion.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        by_track = f.get("by_track") or {}
+        if not by_track:
+            return None
+        tid = None
+        try:
+            tid = json.loads(
+                (d / "mission_ctx.json").read_text(encoding="utf-8")).get("track_id")
+        except (OSError, ValueError):
+            pass
+        if tid is not None and str(tid) in by_track:
+            return by_track[str(tid)]
+        if len(by_track) == 1:
+            return next(iter(by_track.values()))
+        return None
+
     def _finish(self, p: _Pending, *, l3: dict | None = None) -> None:
         self._merge_mission_ctx(p)
+        fusion = self._merge_fusion(p)
+        if fusion:
+            # 推理链路留在 meta.jsonl 里。**不能塞进 manifest**——verdict 与
+            # detections[] 都是 additionalProperties: false，塞进去整份报文
+            # 就校验不过了（上一轮 upload_failed 正是这么栽的）。
+            p.meta.append(json.dumps(
+                {"kind": "FUSION", "event_id": p.event_id, "verdict": fusion},
+                ensure_ascii=False))
         before = p.before or {}
         after = p.after or {}
         verdict = decide_verdict(
@@ -158,7 +198,8 @@ class UploaderNode:
             after_conf=float(after.get("confidence", 0.0)),
             defect_class=p.defect_class,
             is_anomaly=bool((l3 or {}).get("is_anomaly")),
-            aborted=p.abort is not None)
+            aborted=p.abort is not None,
+            fusion=None if p.abort is not None else fusion)
         ctx = _Ctx(p)
         res = self.packer.pack(ctx, run_id=self.run_id, verdict=verdict,
                                meta_lines=p.meta)
