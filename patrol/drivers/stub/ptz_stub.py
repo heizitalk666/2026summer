@@ -28,6 +28,8 @@ from patrol.scene.optics import hfov_at_zoom
 
 _TICK_HZ = 100.0
 _AT_TARGET_DEG = 0.25          # 到位判据
+_POS_TOL = 0.02                # 位置死区，度
+_VEL_TOL = 3.0                 # 死区内允许的残余速度，度每秒
 _SPEED_SCALE = {PTZSpeed.SLOW: 0.35, PTZSpeed.NORMAL: 1.0}
 
 
@@ -60,12 +62,20 @@ class _Axis:
                 want_v = float(np.clip(self.rate_cmd, -vmax, vmax))
         elif self.target is not None:
             err = self.target - self.pos
-            # 梯形速度规划：够不够刹车距离决定加速还是减速
-            brake = self.vel * self.vel / (2.0 * max(1e-6, self.amax))
-            if abs(err) <= brake:
+            if abs(err) <= _POS_TOL and abs(self.vel) <= _VEL_TOL:
+                # 死区内直接锁住。没有死区的话轴会在目标附近永远抖：
+                # dt=0.01 s、amax=240 °/s² 时速度粒度是 2.4 °/s，对应每拍
+                # 位移 0.024°，正好等于残余误差，bang-bang 律永远收敛不了，
+                # at_target 也就永远置不上。
+                self.pos = self.target
+                self.vel = 0.0
                 want_v = 0.0
             else:
-                want_v = float(np.clip(math.copysign(vmax, err), -vmax, vmax))
+                # "恰好停住"速度剖面：v = √(2·a·|e|)，随误差平方根收敛，
+                # 比 bang-bang 平滑，且到位时速度自然归零。
+                v_stop = math.sqrt(2.0 * self.amax * abs(err))
+                want_v = float(np.clip(math.copysign(min(vmax, v_stop), err),
+                                       -vmax, vmax))
         else:
             want_v = 0.0
 

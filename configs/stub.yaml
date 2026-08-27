@@ -46,3 +46,8 @@ stub:
   camera:
     max_fps: 30
     grab_latency_ms: [8, 18]
+    # 外部视点的保鲜期。感知进程每收到一条 IF-3 就把"车在哪、云台指哪"回灌
+    # 给相机桩（见 ICamera.observe_state）——四个进程各有一套桩，只有网关那套
+    # 收得到指令，不回灌的话感知渲染的画面和它报的状态是两个世界。
+    # 超过这个时长没人喂就退回本地驱动，好让 viewer/calibrate/单测照常能跑。
+    viewpoint_ttl_ms: 500

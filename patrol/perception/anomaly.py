@@ -134,6 +134,35 @@ class StatisticalAnomaly(IAnomalyDetector):
             self._mem.pop(0)
         self._refit()
 
+    # -- 基线的固化与加载 ------------------------------------------
+    def export_baseline(self) -> dict:
+        """把当前学到的正常分布导出成一份基线。
+
+        非监督方法的代价是每次冷启动都要重新预热 30 个样本，这期间一律判正常
+        （宁可漏报也不能开机就满屏误报）。把跑过的分布存下来，下次直接加载，
+        预热期就省掉了。training/train_anomaly.py 的统计法通路产出的就是它。
+        """
+        if self._mean is None:
+            return {"model": self.model_name, "ready": False}
+        return {"model": self.model_name, "ready": True,
+                "threshold": self.threshold,
+                "mean": self._mean.tolist(),
+                "istd": self._istd.tolist(),
+                "d_mu": self._d_mu, "d_sigma": self._d_sigma,
+                "samples": len(self._mem)}
+
+    def load_baseline(self, data: dict) -> bool:
+        """加载基线。加载成功即视为已过预热期。"""
+        if not data.get("ready"):
+            return False
+        self._mean = np.asarray(data["mean"], dtype=float)
+        self._istd = np.asarray(data["istd"], dtype=float)
+        self._d_mu = float(data["d_mu"])
+        self._d_sigma = float(max(1e-3, data["d_sigma"]))
+        self.threshold = float(data.get("threshold", self.threshold))
+        self.warmup = 0                      # 分布已就位，不必再预热
+        return True
+
     def score(self, image: np.ndarray, bbox=None) -> AnomalyResult:
         roi = _crop(image, bbox)
         if roi is None or self._mean is None or len(self._mem) < self.warmup:
@@ -191,7 +220,17 @@ def build_anomaly(cfg) -> IAnomalyDetector | None:
     name = str(cfg.get("perception.l3.model", "efficientad_s"))
     thr = float(cfg.get("perception.l3.threshold", 0.55))
     weights = cfg.get("perception.l3.weights", None)
-    if name.startswith("efficientad") and weights:
+    if name.startswith("efficientad") and weights and str(weights).endswith(".pt"):
         return EfficientADAnomaly(weights, threshold=thr)
-    return StatisticalAnomaly(threshold=thr,
-                              warmup=int(cfg.get("perception.l3.warmup", 30)))
+    det = StatisticalAnomaly(threshold=thr,
+                             warmup=int(cfg.get("perception.l3.warmup", 30)))
+    # 统计法的基线可以预先固化（training/train_anomaly.py），加载上就省掉
+    # 冷启动那 30 个样本的预热期。没有基线也照常跑，只是前 30 帧一律判正常。
+    if weights and str(weights).endswith(".json"):
+        import json
+        from pathlib import Path
+        try:
+            det.load_baseline(json.loads(Path(weights).read_text(encoding="utf-8")))
+        except (OSError, ValueError, KeyError):
+            pass
+    return det

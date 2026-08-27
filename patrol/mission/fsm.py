@@ -125,6 +125,8 @@ class MissionFSM:
         self.servo_mode = str(cfg.get("mission.servo.mode", "pid")).lower()
         self.rate_ttl_ms = int(cfg.get("mission.servo.rate_ttl_ms", 300))
         self.p_min = float(cfg.get("perception.quality.pixel_density_target", 120.0))
+        self.image_w = int(cfg.get("camera.width", 1920))
+        self.image_h = int(cfg.get("camera.height", 1080))
         self.max_zoom = float(cfg.get("optics.max_zoom", 3.0))
         self.cruise_ptz = dict(cfg.get("mission.cruise_ptz"))
 
@@ -133,9 +135,13 @@ class MissionFSM:
         self._deadline: Deadline | None = None
         self._entered_ns = mono_ns()
         self._confirm = 0
+        self._confirm_track: int | None = None
+        self._ff_done = False           # AIM 的前馈那一步是否已经走完
+        self._ff_moved = False
         self._resume_retried = False
         self._last_status: dict | None = None
         self._last_det: dict | None = None
+        self._last_verify: dict | None = None
         self.stats = {"verify_started": 0, "verify_done": 0, "aborted": 0,
                       "suppressed": {}}
         self.on_transition: Callable[[State, State, str], None] | None = None
@@ -151,8 +157,13 @@ class MissionFSM:
         self._entered_ns = mono_ns()
         t = self.timeout_s.get(nxt.value)
         self._deadline = Deadline(t * 1000.0) if t else None
+        if nxt is State.HALT_REQ:
+            # 新一次复核开始，丢掉上一轮遗留的复核报文，免得拿旧的当新的用
+            self._last_verify = None
         if nxt is State.AIM:
             self.servo.reset()
+            self._ff_done = False
+            self._ff_moved = False
         if nxt is State.RESUME:
             self._resume_retried = False
         if self.on_transition:
@@ -167,9 +178,18 @@ class MissionFSM:
         return self._home_and_resume()
 
     def _home_and_resume(self) -> list[Command]:
-        """ABORT 与 RESUME 的出口动作完全一致：云台归位 + 恢复巡检。"""
+        """ABORT 与 RESUME 的出口动作完全一致：云台归位 + 恢复巡检。
+
+        归位目标是**巡航姿态**而不是 (0,0,1)：回到正前方等于让云台背对柜列，
+        下一段路就白跑了。pan 由当前车体 yaw 实时折算，见 node.cruise_pan_for。
+        """
+        yaw = 0.0
+        if self._last_status is not None:
+            yaw = float(self._last_status.get("pose", {}).get("yaw_deg", 0.0))
+        bearing = float(self.cruise_ptz.get("look_map_bearing_deg", 90.0))
+        pan = ((bearing - yaw) + 180.0) % 360.0 - 180.0
         return [
-            Command("PTZ_SET", {"pan_deg": float(self.cruise_ptz.get("pan_deg", 0.0)),
+            Command("PTZ_SET", {"pan_deg": float(max(-170.0, min(170.0, pan))),
                                 "tilt_deg": float(self.cruise_ptz.get("tilt_deg", 0.0)),
                                 "zoom": float(self.cruise_ptz.get("zoom", 1.0)),
                                 "speed": "NORMAL"}, timeout_ms=3000),
@@ -191,12 +211,30 @@ class MissionFSM:
                                        (status.get("safety") or {}).get("detail", ""))
         if detection is not None:
             self._last_det = detection
+            self.note_verify(detection)
 
         if self._deadline is not None and self._deadline.expired():
             return self._on_timeout()
 
         handler = getattr(self, "_st_" + self.state.value.lower())
         return handler() or []
+
+    def note_verify(self, ev: dict | None) -> None:
+        """记下一条 stage=VERIFY 的报文，等状态机走到 VERIFY 时再取用。
+
+        **这是一条真实存在的竞态。**perception 判断"该复核了"靠的是 IF-3 的
+        状态组合（停稳 + 变焦到位 + 对焦锁定，见 perception.node.verify_due），
+        这个条件在 mission 还处于 ZOOM 或 CAPTURE 时就已经成立了。于是复核
+        报文可能比状态机早到一两拍；而 node.step() 每拍只保留最后一条 IF-1，
+        随后的巡航报文会把它覆盖掉，等状态机真正进到 VERIFY 时已经没了，只能
+        干等 5 s 超时 ABORT。实测九个证据包里有三个是这么废掉的。
+
+        单独存一份而不是改 _last_det 的覆盖策略，是因为巡航报文本来就该只保
+        留最新的一条——旧的位姿没有意义。VERIFY 报文不一样，它一次复核只有
+        一条，丢了就没了。
+        """
+        if ev is not None and ev.get("stage") == "VERIFY":
+            self._last_verify = ev
 
     def _on_timeout(self) -> list[Command]:
         st = self.state
@@ -222,13 +260,32 @@ class MissionFSM:
     # ------------------------------------------------------------ 各状态
     def _st_cruise(self) -> list[Command]:
         d = self._last_det
+        # **云台正在扫转时不接受触发。**车折返时巡航指向要从 +90° 摆到 -90°，
+        # 180° 摆幅按 60°/s 要 3 秒；这期间目标从画面里一闪而过，据此发起的
+        # 复核等进到 AIM 时目标早已扫走，只能干等到超时再 ABORT。实测这一条
+        # 是"复核全部失败"的直接原因：AIM 期间 30 拍拿不到目标、伺服一个样本
+        # 都没采到。扫转中的帧本身也有运动模糊，不该拿来定案。
+        st = self._last_status
+        if st is not None and (st["ptz"]["moving"] or not st["ptz"]["at_target"]):
+            self._confirm = 0
+            self._confirm_track = None
+            return []
         if d is None or not d.get("suspect", {}).get("is_suspect"):
             self._confirm = 0
+            self._confirm_track = None
             return []
+        # **三帧必须是同一条 track。**只数帧数的话，一帧误检加两帧真表计也能
+        # 凑够三帧，然后按误检那条 track 去 AIM——目标根本不存在，伺服采不到
+        # 样本，只能等超时 ABORT，一次复核预算就这么废了。
+        tid = d["suspect"].get("target_track_id")
+        if tid != self._confirm_track:
+            self._confirm_track = tid
+            self._confirm = 0
         self._confirm += 1
         if self._confirm < self.confirm_frames:
             return []          # 连续 N 帧确认，挡住单帧噪声
         self._confirm = 0
+        self._confirm_track = None
         s = d["suspect"]
         self.ctx = VerifyContext(
             event_id=d.get("event_id") or "",
@@ -282,21 +339,84 @@ class MissionFSM:
             return self._abort("ESTOP", "急停生效，不尝试恢复")
         return []
 
+    def _feedforward_command(self, d: dict, det: dict) -> Command:
+        """把 aim_offset 一次性加到当前云台位姿上。
+
+        aim_offset 由针孔几何直接算出（optics.aim_offset_deg），是**前馈**量。
+        open_loop 模式就到此为止；pid 模式拿它做初值，剩下的残差交给闭环。
+        """
+        ptz = d["context"]["ptz"]
+        off = det.get("aim_offset", {})
+        return Command("PTZ_SET", {
+            "pan_deg": float(np.clip(ptz["pan_deg"] + off.get("pan_deg", 0.0), -170, 170)),
+            "tilt_deg": float(np.clip(ptz["tilt_deg"] + off.get("tilt_deg", 0.0), -30, 60)),
+            "zoom": 1.0, "speed": "NORMAL"}, timeout_ms=3000)
+
+    def _reacquire(self, d: dict | None) -> dict | None:
+        """AIM 期间取反馈量：先认 track_id，跟丢了按"同类别 + 离画面中心最近"重认。
+
+        **为什么不能只认 track_id。**IoU 跟踪靠帧间框重叠匹配，而 AIM 的前馈
+        是一次二十几度的甩头，一帧之内框能平移一百五十像素以上，重叠归零，
+        跟踪必然断链并分配新 id。实测就是这样：前馈把目标端端正正送到画面中心
+        （cx 从 1638 收到 985），可按 id 一个都对不上，PID 一个样本没采到，
+        AIM 只能干等到 3 s 超时。**真机上云台一动同样会断链，这不是桩的毛病。**
+
+        **但也不能退化到 detections[0]。**那会把画面里另一个目标的形心喂进
+        闭环：实测一帧远处压力表的框（cx=1940）就往回路里灌了 −980 px 的假
+        阶跃，云台猛地甩出去，白白吃掉一秒整定时间。
+
+        折中是按类别重认，并在同类中取离画面中心最近的那个——刚做完指向，
+        要找的目标本来就该在中心附近。重认成功后把新 id 写回 ctx，后续的
+        同目标冷却与 before/after 配对才跟得上。
+        """
+        dets = (d or {}).get("detections") or []
+        if not dets:
+            return None
+        tid = self.ctx.track_id if self.ctx else None
+        if tid is not None:
+            for x in dets:
+                if x.get("track_id") == tid:
+                    return x
+        want = self.ctx.defect_class if self.ctx else None
+        same = [x for x in dets if x.get("defect_class") == want] if want else []
+        if not same:
+            return None
+        cx0, cy0 = self.image_w / 2.0, self.image_h / 2.0
+        best = min(same, key=lambda x: (
+            ((x["bbox"][0] + x["bbox"][2]) / 2.0 - cx0) ** 2
+            + ((x["bbox"][1] + x["bbox"][3]) / 2.0 - cy0) ** 2))
+        if self.ctx is not None:
+            self.ctx.track_id = best.get("track_id")
+        return best
+
     def _aim_commands(self, *, first: bool = False) -> list[Command]:
         """AIM：先在广角端把目标转到画面中心，再变焦。"""
         d = self._last_det
-        det = self._pick_detection(d, self.ctx.track_id if self.ctx else None)
+        det = self._reacquire(d)
         if det is None:
+            # AIM 期间丢了目标是个要能看见的事件：伺服没有反馈量可用，
+            # 只能干等到超时。计数暴露出来，便于判断是"目标出框"还是
+            # "检测器漏检"。
+            self.stats["aim_no_target"] = self.stats.get("aim_no_target", 0) + 1
             return []
         if self.servo_mode == "open_loop":
-            # ICD v1.0 原样：一次 PTZ_SET + 等 at_target
-            ptz = d["context"]["ptz"]
-            off = det.get("aim_offset", {})
-            return [Command("PTZ_SET", {
-                "pan_deg": float(np.clip(ptz["pan_deg"] + off.get("pan_deg", 0.0), -170, 170)),
-                "tilt_deg": float(np.clip(ptz["tilt_deg"] + off.get("tilt_deg", 0.0), -30, 60)),
-                "zoom": 1.0, "speed": "NORMAL"}, timeout_ms=3000)]
-        # A1 推荐：速率闭环
+            # ICD v1.0 原样：一次 PTZ_SET + 等 at_target，没有后续修正
+            return [self._feedforward_command(d, det)]
+        if first:
+            # **A1 推荐通路的第一步也是前馈，不是直接进速率闭环。**
+            #
+            # 纯速率闭环在这套系统里有个绕不过去的物理限制：感知 10 Hz、任务
+            # 10 Hz，加上渲染与总线往返，反馈至少滞后 200 ms；云台上限 60 °/s，
+            # 这 200 ms 里已经扫过 12°。所以哪怕 PID 整定得再好，一次 22° 的
+            # 大角度指向也必然冲过头十几度再荡回来——实测 AIM 要 2.2 s，把
+            # 3.0 s 的预算吃掉七成，稍有负载就超时 ABORT。
+            #
+            # 前馈把这段几何上完全已知的角度一次给足（aim_offset 是针孔投影
+            # 直接解出来的，不含未知量），云台按自己的加减速曲线走位置环，
+            # 不受反馈滞后影响；PID 只负责收掉检测框抖动带来的几十像素残差。
+            # 这正是方案书对 aim_offset 的定位——"前馈量，PID 用它做初值"。
+            return [self._feedforward_command(d, det)]
+        # 残差修正：速率闭环
         bbox = det["bbox"]
         cx, cy = (bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0
         pan_dps, tilt_dps = self.servo.step(cx, cy, zoom=float(d["context"]["ptz"]["zoom"]))
@@ -311,10 +431,33 @@ class MissionFSM:
                 self._goto(State.ZOOM, "")
                 return self._zoom_command()
             return []
+        # 先等前馈那一步走完再开闭环。两者同时下发会打架：PTZ_RATE 会把
+        # set_pose 的目标清掉，前馈等于白发。
+        if not self._ff_done:
+            if st is None:
+                return []
+            if st["ptz"]["moving"] or not st["ptz"]["at_target"]:
+                self._ff_moved = True
+            elif self._ff_moved or (mono_ns() - self._entered_ns) > 500_000_000:
+                # 要么已经动过并停稳，要么前馈量小到云台压根没离开到位带
+                self._ff_done = True
+            return []
         if self.servo.on_target():
             self._goto(State.ZOOM, "")
             return self._zoom_command()
         return self._aim_commands()
+
+    def _same_event(self, d: dict) -> bool:
+        """VERIFY 报文的 event_id 必须与本次复核一致。
+
+        event_id 是串起四份 Schema 的主键（ICD §2.2）。收下一条属于**别的**
+        事件的 VERIFY 报文，会让证据包的 before/after 分属两个目标，增益指标
+        随之失去意义。宁可让本次复核超时 ABORT——那是看得见的失败。
+        报文没带 event_id 时放行，那是感知侧的兼容路径，不是错配。
+        """
+        eid = d.get("event_id")
+        return not eid or not (self.ctx and self.ctx.event_id) \
+            or eid == self.ctx.event_id
 
     def _zoom_command(self) -> list[Command]:
         d = self._last_det
@@ -349,8 +492,8 @@ class MissionFSM:
         return []
 
     def _st_verify(self) -> list[Command]:
-        d = self._last_det
-        if d is not None and d.get("stage") == "VERIFY":
+        d = self._last_verify
+        if d is not None and self._same_event(d):
             det = self._pick_detection(d, self.ctx.track_id if self.ctx else None)
             if det is not None and self.ctx is not None:
                 self.ctx.after = _snapshot(det, d["context"]["ptz"]["zoom"])
@@ -391,13 +534,22 @@ class MissionFSM:
         self.ctx = None
 
     @staticmethod
-    def _pick_detection(d: dict | None, track_id: int | None) -> dict | None:
+    def _pick_detection(d: dict | None, track_id: int | None,
+                        *, strict: bool = False) -> dict | None:
+        """按 track_id 取检出。
+
+        ``strict`` 时找不到就返回 None，不退化到 detections[0]。伺服闭环必须
+        用 strict——喂错目标比没有反馈量更糟。VERIFY 那一支则不能 strict：
+        变焦之后跟踪可能重新分配 id，退化到第一个检出才是对的。
+        """
         if not d or not d.get("detections"):
             return None
         if track_id is not None:
             for x in d["detections"]:
                 if x.get("track_id") == track_id:
                     return x
+            if strict:
+                return None
         return d["detections"][0]
 
     def state_name(self) -> str:

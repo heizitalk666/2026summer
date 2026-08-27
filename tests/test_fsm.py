@@ -53,8 +53,13 @@ def det_event(*, is_suspect=True, track_id=7, stage="CRUISE", zoom=1.0,
     }
 
 
-def status(*, chassis="MOVING", at_target=False, focus="LOCKED", kind="PERIODIC",
-           safety=None):
+def status(*, chassis="MOVING", at_target=True, focus="LOCKED", kind="PERIODIC",
+           safety=None, moving=False):
+    """默认 at_target=True：巡航稳态下云台本就停在巡航姿态。
+
+    状态机不接受"云台正在扫转时"的触发（扫转中的帧有运动模糊，且目标很快
+    会扫出画面），所以需要模拟扫转的用例要显式传 at_target=False。
+    """
     return {
         "schema_version": "1.1.0", "msg_type": "STATUS_REPORT", "seq": 1,
         "ts_mono_ns": mono_ns(), "ts_utc_ms": 1, "run_id": "20260901-093012-a7f3",
@@ -63,13 +68,30 @@ def status(*, chassis="MOVING", at_target=False, focus="LOCKED", kind="PERIODIC"
                     "distance_to_goal_m": None, "current_waypoint_id": "WP-07",
                     "battery_pct": 80.0, "safety_layer_active": safety is not None},
         "ptz": {"pan_deg": 90.0, "tilt_deg": 2.0, "zoom": 1.0, "hfov_deg": 60.0,
-                "moving": False, "focus_state": focus, "at_target": at_target},
+                "moving": moving, "focus_state": focus, "at_target": at_target},
         "pose": {"x_m": 10.0, "y_m": -3.18, "yaw_deg": 0.0, "cov_trace": 0.014,
                  "valid": True, "source": "LIDAR_SLAM"},
         "watchdog": {"heartbeat_ok": True, "last_heartbeat_age_ms": 100,
                      "watchdog_triggered": False},
         "exec": None, "safety": safety,
     }
+
+
+def drive_aim(f, *, cx=960.0, cy=540.0, limit=12):
+    """把状态机从 AIM 推到下一个状态。
+
+    AIM 现在分两步：先下发一条 PTZ_SET 把 aim_offset 一次给足（前馈），等云台
+    走位置环到位，再进速率闭环收残差。所以要先喂一拍"云台在动"，再喂"到位"，
+    否则状态机会一直等前馈那一步，直到 500 ms 兜底才开闭环——单元测试里瞬间
+    跑完这几拍，那 500 ms 永远等不到。
+    """
+    f.tick(detection=det_event(cx=cx, cy=cy),
+           status=status(chassis="STOPPED", at_target=False, moving=True))
+    for _ in range(limit):
+        f.tick(detection=det_event(cx=cx, cy=cy), status=status(chassis="STOPPED"))
+        if f.state is not State.AIM:
+            return
+    raise AssertionError("AIM 在 %d 拍内没有退出" % limit)
 
 
 # ---------------------------------------------------------------- 结构
@@ -114,10 +136,7 @@ def test_full_happy_path(cfg):
     f.tick(status=status(chassis="STOPPED"))
     assert f.state is State.AIM
     # 目标已在画面中心 → 伺服判定到位
-    for _ in range(6):
-        f.tick(detection=det_event(cx=960.0, cy=540.0), status=status(chassis="STOPPED"))
-        if f.state is not State.AIM:
-            break
+    drive_aim(f)
     assert f.state is State.ZOOM
     f.tick(status=status(chassis="STOPPED", at_target=True, focus="LOCKED"))
     assert f.state is State.CAPTURE
@@ -144,10 +163,7 @@ def test_before_and_after_snapshots_recorded(cfg):
         f.tick(detection=det_event(), status=status())
     f.tick(detection=det_event(), status=status())
     f.tick(status=status(chassis="STOPPED"))
-    for _ in range(6):
-        f.tick(detection=det_event(cx=960.0, cy=540.0), status=status(chassis="STOPPED"))
-        if f.state is not State.AIM:
-            break
+    drive_aim(f)
     f.tick(status=status(chassis="STOPPED", at_target=True))
     f.tick(status=status(chassis="STOPPED"))
     f.tick(detection=det_event(stage="VERIFY", zoom=3.0, conf=0.91, p=149.5),
@@ -264,10 +280,7 @@ def test_pack_timeout_still_resumes(cfg):
     for _ in range(4):
         f.tick(detection=det_event(), status=status())
     f.tick(status=status(chassis="STOPPED"))
-    for _ in range(6):
-        f.tick(detection=det_event(cx=960.0, cy=540.0), status=status(chassis="STOPPED"))
-        if f.state is not State.AIM:
-            break
+    drive_aim(f)
     f.tick(status=status(chassis="STOPPED", at_target=True))
     f.tick(status=status(chassis="STOPPED"))
     f.tick(detection=det_event(stage="VERIFY", zoom=3.0), status=status(chassis="STOPPED"))
@@ -275,3 +288,19 @@ def test_pack_timeout_still_resumes(cfg):
     time.sleep(0.08)
     f.tick(status=status(chassis="STOPPED"))
     assert f.state is State.RESUME
+
+
+def test_no_trigger_while_gimbal_is_slewing(cfg):
+    """云台扫转中不接受触发。
+
+    车折返时巡航指向要从 +90° 摆到 -90°，180° 摆幅按 60°/s 要 3 秒；这期间
+    目标一闪而过，据此发起的复核等进到 AIM 时目标早已扫走，只能干等超时。
+    实测这是"复核全部失败"的直接原因。
+    """
+    f = make_fsm(cfg)
+    for _ in range(6):
+        f.tick(detection=det_event(), status=status(at_target=False))
+    assert f.state is State.CRUISE, "扫转中不该触发"
+    for _ in range(3):
+        f.tick(detection=det_event(), status=status(at_target=True))
+    assert f.state is State.SUSPECT, "云台停稳后应正常触发"

@@ -210,28 +210,52 @@ class GimbalServo:
                             hfov_at_1x_deg=theta * H / max(1, W),
                             image_span_px=H, **common)
         self.W, self.H = W, H
+        #: 连续多少拍在死区内才算到位。3 拍 = 300 ms，够滤掉形心抖动。
+        self.settle_ticks = int(s.get("settle_ticks", 3))
+        self._in_band = 0
 
     def reset(self) -> None:
         self.pan.reset()
         self.tilt.reset()
+        self._in_band = 0
 
     def step(self, cx: float, cy: float, *, zoom: float,
              t_s: float | None = None) -> tuple[float, float]:
         """给定目标形心像素坐标，返回 (pan_dps, tilt_dps)。
 
-        符号：目标在画面右侧（cx > W/2）时 e < 0，云台应向右转即 pan 减小，
-        与 optics.aim_offset_deg 的增量语义一致。
+        **两个通道的符号都是负反馈，谁都不能多一个负号。**
+
+        方位：目标在画面右侧（cx > W/2）时 e < 0，输出为负，pan 减小。相机
+        方位角 = yaw + pan 且 map 系逆时针为正，pan 减小即向右转，目标回中。
+
+        俯仰：目标在画面上方（cy < H/2）时 e > 0，输出为正，tilt 增大。
+        tilt 正方向是抬头（PinholeCamera 里 fwd.z = sin(tilt)），抬头正好把
+        上方的目标带回中心。**这里曾经多写了一个负号**，两条通道就成了一正
+        一负——方位收敛得好好的，俯仰却在发散：初始 2° 的俯仰偏差（巡航
+        tilt=2.0° 而表计与相机等高）被一路放大，约 1 s 后目标垂直出框，
+        随后 AIM 只能干等到超时 ABORT。整条链路上唯一的症状是"目标突然
+        消失"，很容易误判成检测器漏检或者渲染出错。
         """
         ex = self.W / 2.0 - float(cx)
         ey = self.H / 2.0 - float(cy)
         pan = self.pan.step(ex, zoom=zoom, t_s=t_s)
-        # 俯仰：画面上方 y 小，抬头 tilt 增大，故 e 与 tilt 同号
-        tilt = -self.tilt.step(ey, zoom=zoom, t_s=t_s)
+        tilt = self.tilt.step(ey, zoom=zoom, t_s=t_s)
         return pan, tilt
 
     def on_target(self) -> bool:
-        return (abs(self.pan._e_filt) <= self.deadband_px
-                and abs(self.tilt._e_filt) <= self.deadband_px)
+        """偏差进入死区且**连续保持**若干拍才算到位。
+
+        两条都不能少：
+        - 没喂过样本时 _e_filt 是 0，直接判"到位"会让 AIM 状态一拍就过，
+          PID 根本没跑过——实测审计日志里一条 PTZ_RATE 都没有就是这个原因。
+        - 只看单拍会被形心抖动骗过去，云台还在动就进 ZOOM，变焦后目标出框。
+        """
+        if not (self.pan._primed and self.tilt._primed):
+            return False
+        inside = (abs(self.pan._e_filt) <= self.deadband_px
+                  and abs(self.tilt._e_filt) <= self.deadband_px)
+        self._in_band = (self._in_band + 1) if inside else 0
+        return self._in_band >= self.settle_ticks
 
     def metrics(self) -> dict:
         return {"pan": self.pan.metrics(deadband_px=self.deadband_px),

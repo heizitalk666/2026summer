@@ -150,6 +150,49 @@ def test_ack_passes_schema(gw):
 
 
 # ---------------------------------------------------------------- 看门狗
+def test_watchdog_not_armed_before_first_heartbeat(gw, monkeypatch):
+    """开机时 mission 还没连上来，此时不该倒计时。
+
+    看门狗监视的是"曾经在、现在断了"，不是"从来没来过"。不这样做的话
+    车还没跑就先被判定 AI 失联，实测启动瞬间必然误触发。
+    """
+    from patrol.common import clock
+    assert not gw.watchdog.armed
+    base = clock.mono_ns()
+    monkeypatch.setattr("patrol.gateway.watchdog.mono_ns", lambda: base + 9_000_000_000)
+    assert gw.watchdog.check() is False, "还没收到过心跳就不该触发"
+    assert gw.watchdog.heartbeat_ok
+
+
+def test_heartbeat_is_exempt_from_heartbeat_lost(gw, monkeypatch):
+    """**看门狗态下心跳必须放行，否则永远恢复不了。**
+
+    ICD §4.5 里两句话自相矛盾：「心跳超时期间拒绝一切 issued_by =
+    MISSION_FSM 的指令」与「恢复条件：心跳恢复且连续 3 条正常」。心跳本身
+    就是 MISSION_FSM 发的，按前一句拒掉之后后一句永远不可能满足——看门狗
+    一旦触发就死锁，AI 进程重启回来也接管不了车。实测确实如此。
+    """
+    from patrol.common import clock
+    gw.handle_command(mk("HEARTBEAT", {"mission_state": "CRUISE"}))
+    base = clock.mono_ns()
+    monkeypatch.setattr("patrol.gateway.watchdog.mono_ns", lambda: base + 2_000_000_000)
+    assert gw.watchdog.check() is True
+    monkeypatch.undo()
+
+    # 动作指令被拒
+    assert gw.handle_command(mk("PTZ_SET", {"pan_deg": 0.0, "tilt_deg": 0.0,
+                                            "zoom": 1.0, "speed": "NORMAL"})
+                             )["reject_code"] == "HEARTBEAT_LOST"
+    # 心跳放行，且连续三条能解除看门狗
+    for _ in range(L.HEARTBEAT_RECOVER_COUNT):
+        assert gw.handle_command(mk("HEARTBEAT", {"mission_state": "CRUISE"})
+                                 )["result"] == "ACCEPTED"
+    assert not gw.watchdog.triggered
+    assert gw.handle_command(mk("PTZ_SET", {"pan_deg": 0.0, "tilt_deg": 0.0,
+                                            "zoom": 1.0, "speed": "NORMAL"})
+                             )["result"] == "ACCEPTED"
+
+
 def test_watchdog_timeout_issues_resume(gw, monkeypatch):
     """心跳丢失 → 网关自行下发 RESUME，让车**走完路线**而不是停住。"""
     from patrol.common import clock
@@ -174,6 +217,7 @@ def test_watchdog_timeout_issues_resume(gw, monkeypatch):
 
 def test_watchdog_recovers_after_three_heartbeats(gw, monkeypatch):
     from patrol.common import clock
+    gw.handle_command(mk("HEARTBEAT", {"mission_state": "CRUISE"}))   # 先武装
     base = clock.mono_ns()
     monkeypatch.setattr("patrol.gateway.watchdog.mono_ns", lambda: base + 2_000_000_000)
     assert gw.watchdog.check() is True

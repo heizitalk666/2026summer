@@ -102,10 +102,20 @@ class GatewayNode:
         ch = M.all_checks("SKIP")
         st = self.chassis.status()
 
-        # 心跳超时期间拒绝一切 MISSION_FSM 指令（ICD §4.5）
-        if self.watchdog.triggered and cmd.get("issued_by") == "MISSION_FSM":
+        # 心跳超时期间拒绝 MISSION_FSM 的指令（ICD §4.5），**但心跳本身除外**。
+        #
+        # ICD §4.5 里两句话是自相矛盾的：「心跳超时期间，网关拒绝一切
+        # issued_by = MISSION_FSM 的指令」与「恢复条件：心跳恢复且连续 3 条
+        # 正常，网关解除看门狗态」。心跳本身就是 MISSION_FSM 发的，按前一句
+        # 拒掉之后后一句永远不可能满足——看门狗一旦触发就死锁，AI 进程重启
+        # 回来也接管不了车。实测确实如此。
+        #
+        # 按意图解释：要拒的是**动作指令**，心跳是恢复通道，必须放行。
+        # 这条已记入差异清单待评审，建议 ICD §4.5 补一句"HEARTBEAT 除外"。
+        if (self.watchdog.triggered and cmd.get("issued_by") == "MISSION_FSM"
+                and cmd.get("command") != "HEARTBEAT"):
             return self._reject(cmd_id, ch, "HEARTBEAT_LOST",
-                                "看门狗已介入，拒绝 MISSION_FSM 指令", cmd, t0)
+                                "看门狗已介入，拒绝 MISSION_FSM 的动作指令", cmd, t0)
 
         steps = (
             ("whitelist", lambda: CK.check_whitelist(cmd, allow_ptz_rate=self.allow_rate)),

@@ -154,3 +154,55 @@ def test_position_increment_fallback_also_works(cfg, gains):
                          use_rate=False)
     m = pid.metrics(deadband_px=20.0)
     assert m["steady_error_px"] <= 30.0
+
+
+def test_both_axes_are_negative_feedback(cfg, gains):
+    """两个通道的符号必须都是负反馈。**曾经俯仰通道多了一个负号。**
+
+    几何：相机 y 轴朝下，目标在画面上方时 cy < H/2，故 e = H/2 − cy > 0；
+    tilt 正方向是抬头（PinholeCamera 里 fwd.z = sin(tilt)），抬头把上方的
+    目标带回画面中心，所以此时 tilt_dps 必须为正。方位同理，目标在右侧
+    （cx > W/2）时 e < 0，pan 必须减小（相机方位角 = yaw + pan，map 系逆时针
+    为正，pan 减小即向右转）。
+
+    这条没被覆盖的后果实测过：俯仰正反馈把 2° 的初始偏差一路放大，约 1 s
+    后目标垂直出框，AIM 只能干等到超时 ABORT——而链路上唯一的症状是"检出
+    突然归零"，极易误判成检测器漏检或渲染出错。
+    """
+    servo = GimbalServo(cfg)
+    W, H = servo.W, servo.H
+
+    pan_r, _ = servo.step(W * 0.9, H / 2.0, zoom=1.0)      # 目标偏右
+    servo.reset()
+    pan_l, _ = servo.step(W * 0.1, H / 2.0, zoom=1.0)      # 目标偏左
+    assert pan_r < 0 < pan_l, "方位通道符号反了 (右=%.2f 左=%.2f)" % (pan_r, pan_l)
+
+    servo.reset()
+    _, tilt_up = servo.step(W / 2.0, H * 0.1, zoom=1.0)    # 目标偏上
+    servo.reset()
+    _, tilt_dn = servo.step(W / 2.0, H * 0.9, zoom=1.0)    # 目标偏下
+    assert tilt_dn < 0 < tilt_up, \
+        "俯仰通道符号反了 (上=%.2f 下=%.2f)" % (tilt_up, tilt_dn)
+
+
+def test_tilt_axis_converges_in_closed_loop(cfg, gains):
+    """俯仰通道对着真实被控对象闭环，必须收敛而不是发散。
+
+    只测方位通道是上一版留下的窟窿：单轴测试全绿，跑起来俯仰照样发散。
+    """
+    servo = GimbalServo(cfg)
+    W, H = servo.W, servo.H
+    theta_v = 60.0 * H / W
+    tilt_deg = 2.0                       # 巡航俯仰角
+    target_el_deg = 0.0                  # 目标与相机等高
+    dt = servo.period_s
+    errs = []
+    for k in range(40):
+        # 目标相对光轴的角度 → 像素坐标（小角度下线性）
+        cy = H / 2.0 - (target_el_deg - tilt_deg) * H / theta_v
+        _, tilt_dps = servo.step(W / 2.0, cy, zoom=1.0, t_s=k * dt)
+        tilt_deg += tilt_dps * dt        # 云台按速率积分
+        errs.append(abs(target_el_deg - tilt_deg))
+    assert errs[-1] < 0.2, "俯仰未收敛，残差 %.2f°（轨迹尾段 %s）" % (
+        errs[-1], [round(e, 2) for e in errs[-5:]])
+    assert errs[-1] < errs[0], "俯仰在发散"

@@ -20,8 +20,10 @@ from patrol.scene.world import World
 
 
 class PoseStub(ILocalizer):
-    def __init__(self, cfg, world: World, chassis, seed: int = 0):
+    def __init__(self, cfg, world: World, chassis, seed: int = 0,
+                 passive: bool = False):
         c = cfg.get("stub.pose")
+        self._passive = bool(passive)
         self.world, self._chassis = world, chassis
         self.rng = np.random.default_rng(seed)
         self._rate = float(c.get("rate_hz", 20.0))
@@ -37,8 +39,11 @@ class PoseStub(ILocalizer):
         self._pose = self._sample()
         self._cbs: list[Callable[[Pose], None]] = []
         self._stop = threading.Event()
-        self._thr = threading.Thread(target=self._loop, name="pose_stub", daemon=True)
-        self._thr.start()
+        self._thr: threading.Thread | None = None
+        if not self._passive:
+            self._thr = threading.Thread(target=self._loop, name="pose_stub",
+                                         daemon=True)
+            self._thr.start()
 
     # ------------------------------------------------------------ 内部
     def _sample(self) -> Pose:
@@ -98,7 +103,8 @@ class PoseStub(ILocalizer):
 
     def close(self) -> None:
         self._stop.set()
-        self._thr.join(timeout=1.0)
+        if self._thr is not None:
+            self._thr.join(timeout=1.0)
 
     # ------------------------------------------------------------ 测试用
     def force_lost(self, duration_ms: int = 5000) -> None:

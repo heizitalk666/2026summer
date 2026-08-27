@@ -110,8 +110,10 @@ def node(cfg_ports, tmp_path):
                                "logging": {"dir": str(tmp_path), "level": "ERROR"}})
     n = PerceptionNode(c, seed=5)
     n.camera.start(1920, 1080, 10)
+    # 巡航姿态用 map 方位表示，pan = 方位 − 车体 yaw；测试里车头朝东（yaw=0）
     cp = c.get("mission.cruise_ptz")
-    n.ptz.set_pose(cp["pan_deg"], cp["tilt_deg"], cp["zoom"], PTZSpeed.NORMAL)
+    n.ptz.set_pose(float(cp["look_map_bearing_deg"]), cp["tilt_deg"], cp["zoom"],
+                   PTZSpeed.NORMAL)
     t0 = time.time()
     while time.time() - t0 < 3.0 and not n.ptz.status().at_target:
         time.sleep(0.02)

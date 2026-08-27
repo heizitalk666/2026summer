@@ -29,11 +29,16 @@ class Watchdog:
         self._last_hb_ns = mono_ns()
         self._triggered = False
         self._good_streak = 0
+        # **收到第一条心跳之前不计时。**开机时 mission 还没连上来，此时
+        # 就开始倒计时会在启动瞬间必然误触发看门狗——车还没跑就先被判定
+        # "AI 失联"。看门狗监视的是"曾经在、现在断了"，不是"从来没来过"。
+        self._armed = False
 
     # -- 事件 ---------------------------------------------------------
     def on_heartbeat(self) -> bool:
         """收到一条心跳。返回 True 表示本次调用解除了看门狗态。"""
         self._last_hb_ns = mono_ns()
+        self._armed = True
         if not self._triggered:
             self._good_streak = 0
             return False
@@ -46,7 +51,7 @@ class Watchdog:
 
     def check(self) -> bool:
         """周期调用。返回 True 表示**本次刚刚**判定超时（只触发一次）。"""
-        if self._triggered:
+        if self._triggered or not self._armed:
             return False
         if self.age_ms() * 1_000_000 >= self.timeout_ns:
             self._triggered = True
@@ -63,7 +68,14 @@ class Watchdog:
         return self._triggered
 
     @property
+    def armed(self) -> bool:
+        """是否已经收到过至少一条心跳。"""
+        return self._armed
+
+    @property
     def heartbeat_ok(self) -> bool:
+        if not self._armed:
+            return True          # 还没连上来，不算异常
         return not self._triggered and self.age_ms() * 1_000_000 < self.timeout_ns
 
     def snapshot(self) -> dict:

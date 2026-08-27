@@ -170,7 +170,9 @@
               "VERIFY_FRAME",
               "VERIFY_ROI",
               "ANOMALY_HEATMAP",
-              "META_LOG"
+              "META_LOG",
+              "VERIFY_FRAME_AUX",
+              "CRUISE_VIDEO"
             ]
           },
           "bytes": {
@@ -298,6 +300,14 @@
             "object",
             "null"
           ]
+        },
+        "multiview_spread": {
+          "$comment": "A3：三视角读数极差（% FS），条件式辅视角启用时才有",
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
         }
       }
     }

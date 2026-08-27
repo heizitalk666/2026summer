@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>配电室巡检 · 云端台账</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header>
+  <h1>配电室设备状态视觉测控系统 <span class="sub">云端台账</span></h1>
+  <nav>
+    <button class="tab active" data-tab="ledger">巡检台账</button>
+    <button class="tab" data-tab="review">人工复核 <span id="badge" class="badge">0</span></button>
+    <button class="tab" data-tab="stats">复核增益</button>
+    <button class="tab" data-tab="models">模型版本</button>
+  </nav>
+</header>
+
+<main>
+  <section id="ledger" class="panel">
+    <div class="filters">
+      <label>巡检轮次 <select id="runFilter"><option value="">全部</option></select></label>
+      <label>结论 <select id="verdictFilter">
+        <option value="">全部</option><option>CONFIRMED_DEFECT</option>
+        <option>READING_ABNORMAL</option><option>READING_OK</option>
+        <option>FALSE_ALARM</option><option>UNKNOWN_ANOMALY</option>
+        <option>INCONCLUSIVE</option></select></label>
+      <button id="refresh">刷新</button>
+    </div>
+    <div class="scroll"><table id="tbl">
+      <thead><tr><th>时间</th><th>巡检位</th><th>类别</th><th>结论</th><th>等级</th>
+        <th class="num">Δconf</th><th class="num">密度比</th><th>复核</th><th></th></tr></thead>
+      <tbody></tbody></table></div>
+  </section>
+
+  <section id="review" class="panel hidden">
+    <p class="hint">L3 未知异常与 INCONCLUSIVE 恒需人工复核（ICD §6.3）。
+      L3 的输出只允许进这条队列，不得直接告警。</p>
+    <div id="reviewList"></div>
+  </section>
+
+  <section id="stats" class="panel hidden">
+    <p class="hint"><strong>Δconf 必须按结论分组统计。</strong>复核把一个 0.41 的误检压到
+      0.05 时 Δconf = −0.36，这是正常的；与真缺陷混在一起算均值会接近零，
+      看上去像复核没起作用（ICD §6.4）。</p>
+    <div id="statCards" class="cards"></div>
+    <div class="scroll"><table id="statTbl">
+      <thead><tr><th>结论</th><th class="num">条数</th><th class="num">平均 Δconf</th>
+        <th class="num">平均密度比</th><th class="num">复核成功</th></tr></thead>
+      <tbody></tbody></table></div>
+  </section>
+
+  <section id="models" class="panel hidden">
+    <form id="modelForm" class="row">
+      <input name="version" placeholder="版本号 如 yolo11s-v3" required>
+      <select name="stage"><option>CRUISE</option><option>VERIFY</option><option>L3</option></select>
+      <input name="dataset" placeholder="数据集">
+      <input name="note" placeholder="备注">
+      <label class="chk"><input type="checkbox" name="activate"> 设为当前</label>
+      <button>登记</button>
+    </form>
+    <div class="scroll"><table id="modelTbl">
+      <thead><tr><th>版本</th><th>阶段</th><th>数据集</th><th>指标</th><th>备注</th><th>状态</th></tr></thead>
+      <tbody></tbody></table></div>
+  </section>
+</main>
+
+<div id="detail" class="drawer hidden">
+  <button id="closeDetail" class="close">×</button>
+  <div id="detailBody"></div>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>

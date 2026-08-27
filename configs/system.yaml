@@ -7,6 +7,7 @@ includes:
   - stub.yaml
   - waypoints.yaml
   - camera.yaml
+  - real.yaml
 
 # ---------------------------------------------------------------- 驱动
 # 全仓库唯一区分桩和真机的开关（ICD §8.7）。除 drivers/factory.py 外，
@@ -41,6 +42,10 @@ perception:
   tracker:
     iou_threshold: 0.3
     max_age_frames: 15
+  # event_id 的兜底寿命。正常由复核结束时释放，但 FSM 一旦 ABORT，perception
+  # 那边的释放条件永远不成立，主键会被盖到之后每一帧上。取 25 s：FSM 从
+  # HALT_REQ 到 RESUME 的超时之和是 21.5 s，留 3.5 s 余量。
+  event_id_ttl_s: 25.0
   # === A4：图像质量评价。ICD 把四项指标丢了，这里补回来并显式定义 ===
   quality:
     enabled: true
@@ -60,10 +65,17 @@ perception:
 
 # ---------------------------------------------------------------- 任务层
 mission:
-  # 巡航时云台的固定指向。车沿 y=-3.18 的过道向东行驶（yaw=0），柜面在
-  # y=+1.82，即车的正左方，所以 pan 取 +90°（base_link 的 +y 是左）。
-  # 复核时状态机会把它转到目标上，复核结束后归位到这个巡航姿态。
-  cruise_ptz: {pan_deg: 90.0, tilt_deg: 2.0, zoom: 1.0}
+  # 巡航时云台的指向。
+  #
+  # **用 map 系方位而不是相对车体的 pan。**柜列贴北墙（map 系 +y，方位 90°），
+  # 车沿过道往东走时它在左侧、折返往西走时在右侧。若把巡航姿态写成"相对车体
+  # 左转 90°"，车一掉头云台就背对柜列了——实测折返段检出直接归零。
+  # 写成 map 方位后由 pan = 方位 − 车体 yaw 实时折算，掉头自动跟上。
+  cruise_ptz:
+    look_map_bearing_deg: 90.0   # 对准正北的柜列
+    tilt_deg: 2.0
+    zoom: 1.0
+    retarget_deg: 12.0           # 车体转过这么多度才重发一次，避免刷指令
 
   # === A1：云台伺服模式 ===
   # open_loop = ICD v1.0 原样，一次 PTZ_SET + 等 at_target（开环指向）
@@ -100,6 +112,9 @@ mission:
     aux_settle_ms: 500
     aux_grab_ms: 200
     highlight_trigger: 0.12 # highlight_ratio 超过它就追加辅视角
+    # perception 判断"该复核了"的变焦下限。ICD 没有接口把 mission_state
+    # 送到 perception，只能靠 IF-3 的状态组合推断，见 perception.node.verify_due
+    verify_zoom_min: 1.8
     multiview_spread_limit_pct_fs: 0.5  # 三视角读数极差上限
   # 十状态机的预算与超时（ICD §7.2，C1 取 ICD 一侧）
   # CAPTURE 超时按 A3 放宽到 4.0 s，否则走辅视角路径必然超时进 ABORT

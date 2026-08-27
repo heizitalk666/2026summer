@@ -49,8 +49,9 @@ class _Job:
 
 
 class ChassisStub(IChassis):
-    def __init__(self, cfg, world: World, seed: int = 0):
+    def __init__(self, cfg, world: World, seed: int = 0, passive: bool = False):
         c = cfg.get("stub.chassis")
+        self._passive = bool(passive)
         self.cfg, self.world = cfg, world
         self.rng = np.random.default_rng(seed)
 
@@ -85,8 +86,12 @@ class ChassisStub(IChassis):
         self._route_len = max(1e-6, world.route_length_m())
 
         self._stop_evt = threading.Event()
-        self._thr = threading.Thread(target=self._loop, name="chassis_stub", daemon=True)
-        self._thr.start()
+        self._thr: threading.Thread | None = None
+        if not self._passive:
+            # 被动模式不推进：这套桩不拥有执行器，跑起来只会是一台幽灵车
+            self._thr = threading.Thread(target=self._loop, name="chassis_stub",
+                                         daemon=True)
+            self._thr.start()
 
     # ------------------------------------------------------------ 内部
     def _new_handle(self, kind: str) -> tuple[ExecHandle, _Job]:
@@ -294,7 +299,8 @@ class ChassisStub(IChassis):
 
     def close(self) -> None:
         self._stop_evt.set()
-        self._thr.join(timeout=1.0)
+        if self._thr is not None:
+            self._thr.join(timeout=1.0)
 
     # ------------------------------------------------------------ 测试用
     def travelled_m(self) -> float:

@@ -184,6 +184,14 @@ ALLOWED_DRIFT = {
         ("properties.suspect.properties.trigger_rule.oneOf[1].enum[+QUALITY_LOW]",
          "A4：新增枚举值（次版本号 +1，需同步附录 B.4）"),
     ],
+    "EvidencePackage": [
+        ("properties.files.items.properties.role.enum[+VERIFY_FRAME_AUX]",
+         "A3：条件式辅视角帧的角色（次版本号 +1）"),
+        ("properties.files.items.properties.role.enum[+CRUISE_VIDEO]",
+         "B3：任务书要求证据含视频，ICD 的 role 枚举里漏了（次版本号 +1）"),
+        ("$defs.snapshot.properties.multiview_spread",
+         "A3：三视角读数极差，新增可选字段（次版本号 +1）"),
+    ],
 }
 
 

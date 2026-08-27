@@ -4,6 +4,11 @@
 ptz 的引用——这在真机上是不存在的耦合（真相机不知道车在哪），但桩本来就是
 在"扮演"整个物理世界，这层耦合封在 stub 包内，不会泄漏到业务代码。
 
+**但持有引用还不够。**系统跑起来是四个进程，每个进程各建一套驱动，只有网关
+那一套会收到指令（它是唯一能碰执行器的进程）。感知进程里的 ptz 永远停在开机
+位 (0,0,1×)，据此渲染出的画面与 IF-3 报的状态说的是两个世界。所以视点可以由
+外部通过 ``observe_state()`` 接管，感知节点每收到一条 IF-3 就喂一次。
+
 两条与真机对齐的语义（ICD §9.4 一致性要求）：
 
 1. ``Frame.ts_mono_ns`` 取**曝光开始时刻**，不是取回时刻。取回时刻会把渲染
@@ -50,10 +55,29 @@ class CameraStub(ICamera):
         self._seq = 0
         self._lock = threading.Lock()
         self._last_meta: list[dict] = []
+        self._ext: tuple | None = None          # 外部视点（来自 IF-3）
+        self._ext_ns = 0
+        self._ext_ttl_ns = int(float(stub.get("viewpoint_ttl_ms", 500)) * 1e6)
 
     # ------------------------------------------------------------ 取景
+    def observe_state(self, *, pose_xy_yaw, pan_deg: float, tilt_deg: float,
+                      zoom: float, speed_mps: float) -> None:
+        """接管视点。见 ICamera.observe_state 的说明。
+
+        带 TTL 是为了让**同一个类**在两种场合都对：跑全系统时感知进程持续喂
+        IF-3，视点始终新鲜；而 tools/viewer.py、tools/calibrate.py 和单元测试
+        自己持有整套驱动、根本没有 IF-3，喂不进来就自动退回本地驱动。
+        """
+        with self._lock:
+            self._ext = (tuple(float(v) for v in pose_xy_yaw), float(pan_deg),
+                         float(tilt_deg), float(zoom), float(speed_mps))
+            self._ext_ns = mono_ns()
+
     def _viewpoint(self) -> tuple[tuple[float, float, float], float, float, float, float]:
         """当前视点：(车位姿, pan, tilt, zoom, 车速)。"""
+        with self._lock:
+            if self._ext is not None and mono_ns() - self._ext_ns <= self._ext_ttl_ns:
+                return self._ext
         if self._loc is not None:
             p = self._loc.get_pose()
             pose_xy_yaw = (p.x_m, p.y_m, p.yaw_deg)

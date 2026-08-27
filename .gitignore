@@ -17,3 +17,5 @@ training/runs/
 *.pt
 *.onnx
 *.rknn
+cloud/patrol.db-wal
+cloud/patrol.db-shm

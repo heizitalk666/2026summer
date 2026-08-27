@@ -113,4 +113,7 @@ scene:
   route:
     speed_mps: 0.5
     loop: true
-    points: [WP-10, WP-09, WP-08, WP-07, WP-04, WP-05, WP-06, WP-03, WP-02, WP-01]
+    # 按 x 单调排序：车从西向东走完过道再折返回充电位。
+    # 顺序排错会让车来回倒（WP-07 在 x=12.43 而下一个 WP-04 在 x=10），
+    # 目标反复进出视野，跟踪与抑制规则都会被搅乱。
+    points: [WP-01, WP-02, WP-09, WP-03, WP-08, WP-04, WP-07, WP-05, WP-06, WP-10]

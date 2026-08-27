@@ -270,6 +270,24 @@ class ICamera(ABC):
     @abstractmethod
     def close(self) -> None: ...
 
+    def observe_state(self, *, pose_xy_yaw: tuple[float, float, float],
+                      pan_deg: float, tilt_deg: float, zoom: float,
+                      speed_mps: float) -> None:
+        """告知相机"这台机器此刻的真实视点"。**真机实现为空。**
+
+        真相机的画面本来就来自真实世界，不需要谁来告诉它云台转到哪了。桩不然：
+        桩要扮演的那个物理世界住在**网关进程**里（只有网关能碰执行器，ICD §1.1），
+        而感知进程里的 chassis/ptz 一条指令都收不到，永远停在开机位。不喂这一
+        步，感知渲染出来的画面和 IF-3 报的状态说的是两个世界——实测表现为复核
+        期间 AIM 三十拍一个检出都没有。
+
+        视点数据全部取自 IF-3 StatusReport，**不新增任何接口**：
+        ``pose.{x_m,y_m,yaw_deg}`` / ``ptz.{pan_deg,tilt_deg,zoom}`` /
+        ``chassis.speed_mps``。PTZStub.status() 与 true_pose() 返回的是同一个
+        含抖动的值，所以改走 IF-3 一点保真度都不损失。
+        """
+        return None
+
 
 # ---------------------------------------------------------------- ILocalizer
 class PoseSource(Enum):
