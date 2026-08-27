@@ -61,6 +61,7 @@ READING_OK                   5       0.4458       2.2835
 | 想知道什么 | 看这里 |
 |---|---|
 | 系统怎么搭的、四个进程怎么通信 | [`docs/架构说明.md`](docs/架构说明.md) |
+| **四类 AI 模型怎么配合把识别做好** | [`docs/多模型协同.md`](docs/多模型协同.md) |
 | 每一步命令怎么跑、出什么 | [`docs/操作步骤.md`](docs/操作步骤.md) |
 | 每个设计决定背后的理由 | [`docs/设计思想.md`](docs/设计思想.md) |
 | 接口定义（冻结基线） | [`docs/ICD-RK3576-PATROL-v1.0.md`](docs/ICD-RK3576-PATROL-v1.0.md) |
@@ -81,14 +82,21 @@ patrol/
     stub/         桩：主动注入真机上会出现的麻烦
     real/         串口 / V4L2
     factory.py    全仓库唯一的 driver_mode 分支点
-  perception/   一级检测、二级复核、L2 读数、L3 异常、图像质量评价
+  perception/   四路模型：L1 检测 / L2 分割读数 / L2' OCR 互证 / L3 异常
+    detector/     检测：合成 / YOLO / ONNX
+    segment/      分割：几何（默认）/ 逐像素分类器 / ONNX
+    ocr/          OCR：RapidOCR（自带权重、离线）/ 停用
+    reading/      指针、指示灯、开关、铭牌语义与互证
+    fusion.py     L4 显式仲裁：四路证据 → 六种结论 + 逐条理由
   mission/      十状态机、云台伺服、抑制规则、复核预算
   gateway/      五项校验、参数范围硬编码、心跳看门狗、审计日志
   uploader/     证据包组装、断点续传、云端上报
   tools/        validate / viewer / calibrate / tune_pid / run_all / fakecar
+                console（指令实时流）/ bench_models（四路横向对比）/ textdraw
 cloud/          FastAPI + SQLite 台账、人工复核、模型版本登记
 configs/        system / scene / stub / waypoints / camera / real
-tests/          163 项
+training/       合成数据集生成、检测/分割/异常训练、ONNX 与 RKNN 导出
+tests/          399 项
 ```
 
 ---
@@ -136,6 +144,29 @@ pytest tests/test_serial_protocol.py -v    # 或者直接跑这 19 项，不需�
 
 ---
 
+## 把指令直接显示出来
+
+没有硬件时，这三个面就是"车"和"云台"唯一看得见的样子。一份数据源，三处
+说的话一定一致。
+
+```bash
+python -m patrol.tools.run_all --console     # 系统 + 终端指令流水（推荐）
+python -m patrol.tools.viewer --live         # 预览窗口，画面上叠加指令
+# 浏览器 http://127.0.0.1:8000/ 的「实时」页：指令流水 + 配电室俯视图
+```
+
+```
+[t=   80.7s] → 小车   ✓ 暂停 VERIFY_REQUEST                       1.5 ms
+[t=   83.3s] → 云台   ✓ 转到 pan=+110.0° tilt=+2.7° zoom=1.00×    1.6 ms
+[t=   84.7s] → 云台   ✓ 转到 pan=+111.1° tilt=+2.7° zoom=2.59×    0.9 ms
+[t=   86.9s] → 小车   ✓ 恢复巡航                                    0.9 ms
+```
+
+被拒的指令标红，并打出六项校验里是哪一项没过——这是三层安全边界唯一可
+观测的地方。
+
+---
+
 ## 当前状态
 
 | 项目 | 状态 |
@@ -144,7 +175,10 @@ pytest tests/test_serial_protocol.py -v    # 或者直接跑这 19 项，不需�
 | 读数精度 | 基本误差 0.469 % FS、线性度 0.267 % FS（限值 0.5 / 0.4）达标 |
 | 重复性 | **0.321 % FS，压线超差**（限值 0.3），受检测框噪声支配，见下 |
 | 云台控制 | 3× 变焦下超调 0.9 %、调节时间 1.10 s（限值 10 % / 1.5 s）达标 |
-| 测试 | 163 项通过，`validate` 50 项全绿 |
+| 识别 | 四路模型（检测 / 分割 / OCR / 异常）+ 显式仲裁全部在跑，见 [`docs/多模型协同.md`](docs/多模型协同.md) |
+| OCR 互证 | 已在跑真模型（RapidOCR，离线自带权重）；实测 90 px 以上可读，误判冲突全档为 0 |
+| 合成数据集 | 检测框 / 分割掩膜 / OCR / L3 正常集一次产出，掩膜与图像逐像素对齐 |
+| 测试 | 399 项通过，`validate` 51 项全绿 |
 | YOLO 权重 | 接口与加载逻辑就位，默认走合成检测器，等训练 |
 | RKNN 上板 | 导出脚本就位，等板子 |
 
