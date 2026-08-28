@@ -184,19 +184,23 @@ def test_expected_zoom_matches_what_the_fsm_will_command():
     assert got == pytest.approx(want)
 
 
-def test_expected_zoom_is_conservative_when_the_track_is_missing():
-    """查不到那条 track 时取最大倍率——宁可晚触发，也不早触发。
+def test_expected_zoom_does_not_jump_to_max_when_a_frame_misses():
+    """**这条用例本来写反了，反的那一版恰恰把 bug 钉成了"正确行为"。**
 
-    晚触发的代价是一次 VERIFY 超时（有记录、能查）；早触发的代价是一次
-    看起来正常、其实什么都没复核的证据包（查不出来）。
+    原来它断言"查不到 track 就返回 max_zoom"，理由写的是"宁可晚触发不早触发"。
+    方向听着对，实际是灾难：晚触发在这里不是"晚一点"，是**永远不触发**——
+    期望值被顶到 3.0 而状态机只下发 2.14，`_zoom_settled` 再也不会成立。
+
+    正确的行为是**保留上一次算出的值**：漏检一帧不该改变"状态机打算放到多大"
+    这个事实。只有一次都没算过时才没有值可留。
     """
-    n = Node()
+    n = Node(target_zoom=2.143)
 
     class Det:
         track_id = 42
 
-    assert n._expected_zoom((0.9, Det(), "X"), [], 1.0) == pytest.approx(3.0)
-    assert n._expected_zoom(None, [], 1.0) == pytest.approx(3.0)
+    assert n._expected_zoom((0.9, Det(), "X"), [], 1.0) == pytest.approx(2.143)
+    assert n._expected_zoom(None, [], 1.0) == pytest.approx(2.143)
 
 
 def test_the_dead_constant_is_gone():
@@ -250,3 +254,49 @@ def test_a_normal_verify_does_not_leave_the_timer_running():
     n._last_status = status(zoom=2.4, pan=110.0)
     assert n.verify_due() is True and n._verify_ready_since_ns == 0
     assert not n.log.warns, "正常路径不该打兜底 WARN"
+
+
+# ---------------------------------------------------------------- 期望倍率不被污染
+def test_expected_zoom_keeps_the_old_value_when_the_track_is_missing():
+    """**这条钉的是第三次踩同一个坑，也是最难查的一次。**
+
+    复核期间车是停的、云台拉到位，目标偶尔会漏检一帧。原来 `_expected_zoom`
+    在查不到那条 track 时返回 max_zoom——那个"保守"默认对"该放多大"是合理的，
+    对"状态机会放到多大"却是灾难：期望值一旦被顶到 3.0，而状态机实际只下发
+    2.14，`_zoom_settled` 就永远不成立。
+
+    实测后果：一轮 3 个证据包废掉一个，感知在整个 VERIFY 窗口里**一条日志都
+    没有**，只在证据包里留下一个 density_ratio = 0 的 INCONCLUSIVE。
+    用录下来的 IF-3 回放验证过：期望值 2.143 时命中 98 次，3.0 时命中 0 次。
+    """
+    n = Node(target_zoom=2.143)
+
+    class Det:
+        track_id = 84
+
+    # 这一帧没检出 track 84（漏检），期望倍率必须原样保留
+    assert n._expected_zoom((0.9, Det(), "CONF_BAND"), [], 1.0) == pytest.approx(2.143)
+    # 连 best_suspect 都没有时同理
+    assert n._expected_zoom(None, [], 1.0) == pytest.approx(2.143)
+
+
+def test_a_missed_frame_does_not_deadlock_the_verification():
+    """漏检一帧之后，判据必须还认得出"云台已经到位了"。"""
+    n = Node(target_zoom=2.143)
+
+    class Det:
+        track_id = 84
+
+    n._event_target_zoom = n._expected_zoom((0.9, Det(), "X"), [], 2.14)
+    n._last_status = status(zoom=2.14, pan=111.3, tilt=0.1)
+    assert n.verify_due() is True, "一帧漏检就把整次复核锁死了"
+
+
+def test_expected_zoom_starts_conservative_only_when_nothing_is_known():
+    """第一次算、手里还没有旧值时，才退回最大倍率——宁可晚触发不早触发。"""
+    n = Node(target_zoom=0.0)
+
+    class Det:
+        track_id = 7
+
+    assert n._expected_zoom((0.9, Det(), "X"), [], 1.0) == pytest.approx(0.0)

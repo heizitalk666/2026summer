@@ -287,11 +287,19 @@ class PerceptionNode:
         （verify_due 一命中就立刻发报文并清掉 event_id）。
         """
         from patrol.scene.optics import zoom_for_density
+        keep = float(getattr(self, "_event_target_zoom", 0.0) or 0.0)
         if best_suspect is None:
-            return float(self.max_zoom)
+            return keep
         tid = max(0, int(best_suspect[1].track_id))
         p = next((float(e["pixel_density_px"]) for e in entries
                   if int(e["track_id"]) == tid), 0.0)
+        if p <= 0.0:
+            # **查不到这条 track 就保留上一次的值，不要顶到 max_zoom。**
+            # zoom_for_density 对 p<=0 的约定是返回最大倍率，那个约定对"该放多大"
+            # 是合理的，对"状态机会放到多大"却是灾难：期望值一旦被顶到 3.0，
+            # 而状态机实际只下发 2.14，_zoom_settled 就永远不成立——复核干等到
+            # 超时，全程没有任何报错。实测一轮 3 个证据包里废掉一个。
+            return keep
         return float(zoom_for_density(float(cur_zoom), p, self.p_min,
                                       self.max_zoom))
 
@@ -476,13 +484,14 @@ class PerceptionNode:
         # 实测：第一次 ABORT 于 t=7.6 s，第二次 t=17.0 s 重试时状态机算的是
         # 2.010×，而 perception 还在等第一次那个更大的数。
         #
-        # **对齐的时机是"发出 is_suspect=true 的那一帧"，不是"任何巡航帧"。**
-        # 状态机就是拿这条报文里的密度去算 target_zoom 的，所以两边逐位相同。
-        # 而被抑制的帧（RESUME_SILENCE / WAYPOINT_ONCE）状态机根本不理，
-        # 拿它们刷新会把期望值改成一个状态机从未用过的数——实测就是这么把
-        # 期望倍率刷成 1.0 的：复核刚结束、车贴着目标继续走的那几帧密度很高，
-        # 算出来的期望倍率自然接近 1.0，下一次复核于是在 AIM 阶段就误命中。
-        if suspect["is_suspect"]:
+        # **只在 cruising 时更新**，也就是"车在走、变焦还在广角端"——这正是
+        # 状态机 latch 自己那份 target_zoom 的条件，两边因此对得上。
+        #
+        # 不能用 `suspect["is_suspect"]` 当条件（试过，栽了）：is_suspect 只在
+        # **铸新主键**时才会被降级，一旦主键已经攥在手里，复核全程它都是 true。
+        # 于是车停下、云台拉到 2.14× 之后那几十帧照样在刷新期望倍率，而那些帧
+        # 里目标时有时无——一帧漏检就把期望值顶到 max_zoom，复核当场死锁。
+        if cruising and best_suspect is not None:
             self._event_target_zoom = self._expected_zoom(best_suspect, out, zoom)
         if suspect["is_suspect"] and self.event_id is None:
             if cruising:
@@ -780,6 +789,11 @@ class PerceptionNode:
         return ev
 
     def _clear_event(self) -> None:
+        # **闩锁必须跟着主键一起清。**_verify_armed 只在 verify_due() 转 false
+        # 的那一支复位；万一它在两次复核之间没被复位，下一次复核就会走进
+        # "verify_due 为真但 armed 已置位"的分支——那一支既不发报文也不打日志，
+        # 表现为感知在整个 VERIFY 窗口里一声不吭，状态机干等到超时。
+        self._verify_armed = False
         self.event_id = None
         self._event_started_ns = 0
         self._event_conf_before = 0.0
