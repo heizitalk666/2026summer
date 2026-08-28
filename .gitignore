@@ -11,6 +11,9 @@ cloud/patrol.db
 cloud/storage/
 *.jsonl
 
+# 工具产物（viewer / tune_pid / calibrate 的输出）
+out/
+
 # 训练产物
 training/datasets/
 training/runs/

@@ -15,14 +15,24 @@
 ```bash
 git clone https://github.com/heizitalk666/2026summer.git
 cd 2026summer
+
+# ⚠ 这一行不能少：代码全在这个分支上，main 分支里一行代码都没有
+git checkout claude/project-task-review-7c7oc5
+
 python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
 pip install -r requirements.txt                        # 约 80 MB，不需要 GPU
 ```
 
+> **第一次来的人先读 [`docs/新手上路.md`](docs/新手上路.md)**——每一步都写了
+> 「你应该看到什么」和「看不到时查哪一行」。需要 Python 3.10 以上。
+>
+> 网页版（可勾选、记进度）：
+> <https://claude.ai/code/artifact/8daf04a9-17b7-423d-92d6-ad43cde83093>
+
 然后按顺序跑这四条，每一条都有明确的预期输出：
 
 ```bash
-# 1. 接口定义与代码是否还对得上（50 项）。这条不过就别往下走
+# 1. 接口定义与代码是否还对得上（51 项）。这条不过就别往下走
 python -m patrol.tools.validate
 
 # 2. 看一眼虚拟配电室，出一张变焦对比图
@@ -62,6 +72,7 @@ READING_OK                   5       0.4458       2.2835
 |---|---|
 | **每个文件是干嘛的**、一次复核的完整数据流 | [`docs/代码地图.md`](docs/代码地图.md) |
 | **剩下四周谁做什么**、验收标准与风险 | [`docs/后续计划与分工.md`](docs/后续计划与分工.md) |
+| **第一次上手、装环境、跑通** | [`docs/新手上路.md`](docs/新手上路.md) |
 | 系统怎么搭的、四个进程怎么通信 | [`docs/架构说明.md`](docs/架构说明.md) |
 | **四类 AI 模型怎么配合把识别做好** | [`docs/多模型协同.md`](docs/多模型协同.md) |
 | 每一步命令怎么跑、出什么 | [`docs/操作步骤.md`](docs/操作步骤.md) |
