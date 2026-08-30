@@ -1,0 +1,591 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://patrol.local/schemas/detection_event.schema.json",
+  "title": "DetectionEvent",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "msg_type",
+    "seq",
+    "ts_mono_ns",
+    "ts_utc_ms",
+    "run_id",
+    "event_id",
+    "stage",
+    "model",
+    "context",
+    "detections",
+    "suspect",
+    "latency_ms"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "msg_type": {
+      "const": "DETECTION_EVENT"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "ts_mono_ns": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "ts_utc_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^\\d{8}-\\d{6}-[0-9a-f]{4}$"
+    },
+    "event_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "stage": {
+      "enum": [
+        "CRUISE",
+        "VERIFY"
+      ]
+    },
+    "model": {
+      "type": "object",
+      "required": [
+        "name",
+        "input_w",
+        "input_h",
+        "quant",
+        "conf_threshold",
+        "nms_iou"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "enum": [
+            "yolo11s",
+            "yolo11m"
+          ]
+        },
+        "input_w": {
+          "type": "integer",
+          "minimum": 64,
+          "maximum": 4096
+        },
+        "input_h": {
+          "type": "integer",
+          "minimum": 64,
+          "maximum": 4096
+        },
+        "quant": {
+          "enum": [
+            "INT8",
+            "FP16"
+          ]
+        },
+        "conf_threshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "nms_iou": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "context": {
+      "type": "object",
+      "required": [
+        "waypoint_id",
+        "pose",
+        "pose_valid",
+        "speed_mps",
+        "ptz",
+        "image_w",
+        "image_h"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "waypoint_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^WP-\\d{2}$"
+        },
+        "pose": {
+          "type": "object",
+          "required": [
+            "x_m",
+            "y_m",
+            "yaw_deg",
+            "cov_trace"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "x_m": {
+              "type": "number"
+            },
+            "y_m": {
+              "type": "number"
+            },
+            "yaw_deg": {
+              "type": "number",
+              "minimum": -180,
+              "maximum": 180
+            },
+            "cov_trace": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        },
+        "pose_valid": {
+          "type": "boolean"
+        },
+        "speed_mps": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1.5
+        },
+        "ptz": {
+          "type": "object",
+          "required": [
+            "pan_deg",
+            "tilt_deg",
+            "zoom",
+            "hfov_deg"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "pan_deg": {
+              "type": "number",
+              "minimum": -170,
+              "maximum": 170
+            },
+            "tilt_deg": {
+              "type": "number",
+              "minimum": -30,
+              "maximum": 60
+            },
+            "zoom": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 3
+            },
+            "hfov_deg": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 180
+            }
+          }
+        },
+        "image_w": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "image_h": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "detections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "track_id",
+          "defect_class",
+          "confidence",
+          "bbox",
+          "target_size_m",
+          "est_distance_m",
+          "pixel_density_px",
+          "aim_offset",
+          "l2_reading"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "track_id": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "defect_class": {
+            "$ref": "#/$defs/defectClass"
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "bbox": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "minimum": 0
+            },
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "target_size_m": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "est_distance_m": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "pixel_density_px": {
+            "type": "number",
+            "minimum": 0
+          },
+          "aim_offset": {
+            "type": "object",
+            "required": [
+              "pan_deg",
+              "tilt_deg"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "pan_deg": {
+                "type": "number"
+              },
+              "tilt_deg": {
+                "type": "number"
+              }
+            }
+          },
+          "l2_reading": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "value",
+                  "unit",
+                  "range_min",
+                  "range_max",
+                  "in_normal_band",
+                  "reading_confidence",
+                  "roi"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "POINTER_GAUGE",
+                      "DIGITAL_DISPLAY",
+                      "INDICATOR_LIGHT",
+                      "SWITCH_POSITION"
+                    ]
+                  },
+                  "value": {
+                    "type": [
+                      "number",
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "unit": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "range_min": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "range_max": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "in_normal_band": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "reading_confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "roi": {
+                    "type": "array",
+                    "items": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "minItems": 4,
+                    "maxItems": 4
+                  }
+                }
+              }
+            ]
+          },
+          "quality": {
+            "$comment": "差异清单 A4 增补的可选字段（ICD 冻结规则：新增可选字段=次版本号+1，通知即可）。方案书 §6.4 的四项质量指标，ICD v1.0 遗漏。",
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "pixel_density_px",
+                  "pixel_density",
+                  "blur",
+                  "highlight",
+                  "occlusion",
+                  "score"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "pixel_density_px": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "pixel_density": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "blur": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "highlight": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "occlusion": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "score": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "l3_anomaly": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "required": [
+            "model",
+            "anomaly_score",
+            "threshold",
+            "is_anomaly",
+            "heatmap_ref"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "model": {
+              "type": "string"
+            },
+            "anomaly_score": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "threshold": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "is_anomaly": {
+              "type": "boolean"
+            },
+            "heatmap_ref": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "suspect": {
+      "type": "object",
+      "required": [
+        "is_suspect",
+        "trigger_rule",
+        "target_track_id",
+        "severity",
+        "novelty",
+        "priority",
+        "suppressed_by"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "is_suspect": {
+          "type": "boolean"
+        },
+        "trigger_rule": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "enum": [
+                "CONF_BAND",
+                "L2_UNREADABLE",
+                "L2_OUT_OF_BAND",
+                "L3_ANOMALY",
+                "MANUAL",
+                "QUALITY_LOW"
+              ]
+            }
+          ]
+        },
+        "target_track_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "severity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "novelty": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "priority": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "suppressed_by": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "enum": [
+                "TRACK_COOLDOWN",
+                "WAYPOINT_ONCE",
+                "RESUME_SILENCE",
+                "BUDGET_EXHAUSTED",
+                "POSE_INVALID"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "latency_ms": {
+      "type": "object",
+      "required": [
+        "capture_to_infer",
+        "infer",
+        "postproc",
+        "total"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "capture_to_infer": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "infer": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "postproc": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "suspect": {
+            "properties": {
+              "is_suspect": {
+                "const": true
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "event_id": {
+            "type": "string"
+          },
+          "suspect": {
+            "required": [
+              "trigger_rule"
+            ],
+            "properties": {
+              "trigger_rule": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "defectClass": {
+      "enum": [
+        "PRESSURE_GAUGE",
+        "OIL_LEVEL_GAUGE",
+        "INDICATOR_LIGHT",
+        "SWITCH_HANDLE",
+        "INSULATOR_BREAK",
+        "OIL_LEAK",
+        "RUST_CORROSION",
+        "FOREIGN_OBJECT",
+        "DOOR_OPEN",
+        "CABLE_LOOSE"
+      ]
+    }
+  }
+}

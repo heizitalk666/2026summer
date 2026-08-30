@@ -1,0 +1,315 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://patrol.local/schemas/evidence_package.schema.json",
+  "title": "EvidencePackage",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "msg_type",
+    "run_id",
+    "event_id",
+    "waypoint_id",
+    "ts_utc_ms",
+    "verdict",
+    "before",
+    "after",
+    "gain",
+    "timeline",
+    "files",
+    "abort"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "msg_type": {
+      "const": "EVIDENCE_PACKAGE"
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^\\d{8}-\\d{6}-[0-9a-f]{4}$"
+    },
+    "event_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "waypoint_id": {
+      "type": "string",
+      "pattern": "^WP-\\d{2}$"
+    },
+    "ts_utc_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "verdict": {
+      "type": "object",
+      "required": [
+        "result",
+        "defect_class",
+        "severity",
+        "needs_human_review",
+        "confidence"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "result": {
+          "enum": [
+            "CONFIRMED_DEFECT",
+            "FALSE_ALARM",
+            "READING_OK",
+            "READING_ABNORMAL",
+            "UNKNOWN_ANOMALY",
+            "INCONCLUSIVE"
+          ]
+        },
+        "defect_class": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "severity": {
+          "enum": [
+            "INFO",
+            "WARN",
+            "CRITICAL"
+          ]
+        },
+        "needs_human_review": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "before": {
+      "$ref": "#/$defs/snapshot"
+    },
+    "after": {
+      "$ref": "#/$defs/snapshot"
+    },
+    "gain": {
+      "type": "object",
+      "required": [
+        "delta_conf",
+        "pixel_density_ratio",
+        "verify_success"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "delta_conf": {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1
+        },
+        "pixel_density_ratio": {
+          "type": "number",
+          "minimum": 0
+        },
+        "verify_success": {
+          "type": "boolean"
+        }
+      }
+    },
+    "timeline": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "state",
+          "duration_ms"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "state": {
+            "enum": [
+              "SUSPECT",
+              "HALT_REQ",
+              "AIM",
+              "ZOOM",
+              "CAPTURE",
+              "VERIFY",
+              "PACK",
+              "RESUME",
+              "ABORT"
+            ]
+          },
+          "duration_ms": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "role",
+          "bytes",
+          "sha256",
+          "uploaded"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "CRUISE_ANNOTATED",
+              "CRUISE_RAW",
+              "VERIFY_FRAME",
+              "VERIFY_ROI",
+              "ANOMALY_HEATMAP",
+              "META_LOG",
+              "VERIFY_FRAME_AUX",
+              "CRUISE_VIDEO"
+            ]
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "uploaded": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "abort": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "required": [
+            "at_state",
+            "reason",
+            "detail"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "at_state": {
+              "enum": [
+                "SUSPECT",
+                "HALT_REQ",
+                "AIM",
+                "ZOOM",
+                "CAPTURE",
+                "VERIFY",
+                "PACK",
+                "RESUME"
+              ]
+            },
+            "reason": {
+              "enum": [
+                "STATE_TIMEOUT",
+                "SAFETY_EVENT",
+                "ESTOP",
+                "DRIVER_ERROR",
+                "POSE_INVALID",
+                "CLOUD_CANCEL"
+              ]
+            },
+            "detail": {
+              "type": "string",
+              "maxLength": 256
+            }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "abort": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "abort"
+        ]
+      },
+      "then": {
+        "properties": {
+          "gain": {
+            "properties": {
+              "verify_success": {
+                "const": false
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "snapshot": {
+      "type": "object",
+      "required": [
+        "confidence",
+        "pixel_density_px",
+        "zoom",
+        "est_distance_m",
+        "defect_class",
+        "l2_reading"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "pixel_density_px": {
+          "type": "number",
+          "minimum": 0
+        },
+        "zoom": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 3
+        },
+        "est_distance_m": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "defect_class": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "l2_reading": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "multiview_spread": {
+          "$comment": "A3：三视角读数极差（% FS），条件式辅视角启用时才有",
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

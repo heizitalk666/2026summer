@@ -1,0 +1,228 @@
+# 主配置。四个节点进程共用这一份。
+#
+# 差异清单 A1–A4 四条争议全部实现为下面的开关，默认取推荐的一侧。
+# D3 评审时改一行即可切到另一侧做对比演示。
+includes:
+  - scene.yaml
+  - stub.yaml
+  - waypoints.yaml
+  - camera.yaml
+  - real.yaml
+
+# ---------------------------------------------------------------- 驱动
+# 全仓库唯一区分桩和真机的开关（ICD §8.7）。除 drivers/factory.py 外，
+# 任何其他文件出现 if mode == "stub" 都算违反本约定，评审时会检查。
+driver_mode: stub          # stub | real
+
+# ---------------------------------------------------------------- 传输
+# ICD §1.2 原文是 ipc://，但 ipc 在 Windows 上不可用。ICD 已预留切换口子。
+bus:
+  detection: tcp://127.0.0.1:15001    # IF-1  perception → mission
+  command:   tcp://127.0.0.1:15002    # IF-2  mission → gateway (REQ/REP)
+  status:    tcp://127.0.0.1:15003    # IF-3  gateway → mission + perception
+
+logging:
+  level: INFO
+  dir: logs
+
+# ---------------------------------------------------------------- 感知
+perception:
+  fps: 10                   # 巡航态帧率。ICD §5.2：由跟踪连续性定，不是算力妥协
+  detector: synthetic       # synthetic | yolo   （代码先行，权重就位后改这里）
+  model:
+    cruise:  {name: yolo11s, conf_threshold: 0.25, quant: INT8}
+    verify:  {name: yolo11m, conf_threshold: 0.60, quant: INT8}
+    nms_iou: 0.45
+    input_w: 640
+    input_h: 640
+  yolo:
+    weights_cruise: training/runs/cruise/weights/best.pt
+    weights_verify: training/runs/verify/weights/best.pt
+    device: cpu
+  tracker:
+    iou_threshold: 0.3
+    max_age_frames: 15
+  # event_id 的兜底寿命。正常由复核结束时释放，但 FSM 一旦 ABORT，perception
+  # 那边的释放条件永远不成立，主键会被盖到之后每一帧上。取 25 s：FSM 从
+  # HALT_REQ 到 RESUME 的超时之和是 21.5 s，留 3.5 s 余量。
+  event_id_ttl_s: 25.0
+  # perception 靠 IF-3 的状态组合推断"状态机是不是在等复核报文"（ICD 没有
+  # 把 mission_state 送到 perception，见 perception.node.verify_due）。
+  # 推断偏严会让状态机干等到超时，而且**全程没有任何报错**。这个宽限期是
+  # 兜底：底盘停稳、云台到位、对焦锁定、指向偏离巡航姿态四条都成立、只有
+  # 倍率对不上，并且稳定保持了这么久，就照发不误并打一条 WARN。
+  # 宁可复核质量差一点（证据包里看得出来），也不要静默失效（看不出来）。
+  verify_grace_s: 1.5
+  # === A4：图像质量评价。ICD 把四项指标丢了，这里补回来并显式定义 ===
+  quality:
+    enabled: true
+    weights:                # 四项指标的加权，加权和即方案书的质量总分 Q
+      pixel_density: 0.50
+      blur: 0.20
+      highlight: 0.20
+      occlusion: 0.10
+    threshold: 0.75         # Q < 0.75 触发主动测量（方案书 §6.4）
+    pixel_density_target: 120.0   # 由 0.5 % FS 精度反推（方案书 §5.3.2）
+  # === L2 分割。读数的第二种实现路线，与几何法接同一个接口 ===
+  #
+  # 默认 builtin —— 不加载任何权重，读数走 reading/pointer.py 的几何法。
+  # 这是**用数据定下来的默认**，不是偷懒：tools/bench_models.py 实测，
+  # 在本项目的合成表盘上级联并不比几何法更准（0.11 vs 0.05 %FS），
+  # 而且慢 2.4 倍（5.5 ms vs 2.4 ms）。
+  #
+  # 学习法的价值在几何法的假设不成立时——方形表、指针与背景同色、玻璃反光
+  # 盖住半个盘面。那类样本我们现在还没有，所以先不开。等真机数据到了，
+  # 用 bench_models 重新比一次再决定。
+  segmenter:
+    backend: builtin        # builtin | npz | onnx
+    weights: training/runs/seg/pixel.npz
+    min_side_px: 40         # ROI 短边小于此不跑：逐像素分类没有意义
+    input_size: 256         # 仅 onnx 后端用
+  # === 第二条读数通路：OCR。读表面印着的量程/单位/位置牌，与标定先验对质 ===
+  #
+  # 它抓的是几何法**原理上抓不到**的一类错误：指针角度量得再准，量程错了
+  # 读数就是错的，而且错得毫无征兆。见 perception/reading/nameplate.py。
+  ocr:
+    backend: rapid          # rapid | off。引擎装不上时自动降级为 off，链路不断
+    min_conf: 0.50          # 低于此的词条直接丢弃
+    # ROI 短边小于这个像素数就不跑 OCR。取 120 与像素密度判据线同值不是巧合：
+    # 字读不读得出、针量不量得准，受制于同一个东西。
+    #
+    # 实测（clean render，正对无透视）：60 px 读出的是垃圾且会导致误判，
+    # 90 px 起刻度数字正确，120 px 起单位也能读对。实际场景里有透视、
+    # 抖动与 4K→1920 裁剪重采样，所以真实可读阈值高于这个数——表现为
+    # 互证如实报"证据不足"，而不是报错值。
+    min_side_px: 120.0
+    upscale_to_px: 320.0    # 送引擎前上采样到的短边。表盘刻度字本来就小
+    dial_labels: 5          # 表盘上印几个数字标签（本项目渲染器是量程四等分）
+  l3:
+    enabled: true
+    model: efficientad_s      # 权重就位后启用；无权重时自动退回统计法
+    threshold: 0.55           # 异常分按"偏离正常分布几个 σ"计，除以 6 归一，
+                              # 故 0.55 对应 3.3σ 的经典离群判据
+    warmup: 30                # 少于这么多正常样本时一律判正常，避免冷启动误报
+
+# ---------------------------------------------------------------- 任务层
+mission:
+  # 巡航时云台的指向。
+  #
+  # **用 map 系方位而不是相对车体的 pan。**柜列贴北墙（map 系 +y，方位 90°），
+  # 车沿过道往东走时它在左侧、折返往西走时在右侧。若把巡航姿态写成"相对车体
+  # 左转 90°"，车一掉头云台就背对柜列了——实测折返段检出直接归零。
+  # 写成 map 方位后由 pan = 方位 − 车体 yaw 实时折算，掉头自动跟上。
+  cruise_ptz:
+    look_map_bearing_deg: 90.0   # 对准正北的柜列
+    tilt_deg: 2.0
+    zoom: 1.0
+    retarget_deg: 12.0           # 车体转过这么多度才重发一次，避免刷指令
+
+  # === A1：云台伺服模式 ===
+  # open_loop = ICD v1.0 原样，一次 PTZ_SET + 等 at_target（开环指向）
+  # pid       = 差异清单推荐，PTZ_RATE 速率闭环，可导出阶跃响应曲线
+  servo:
+    mode: pid               # pid | open_loop
+    period_ms: 100          # 控制周期，与巡航帧率一致
+    # 整定结果（tools/tune_pid.py，方案书 §6.3.3 的临界比例度法）：
+    #   实测 Kcr = 7.0，Tcr = 1.12 s
+    #   齐格勒-尼科尔斯给出 Kp=4.20 Ki=7.49 Kd=0.589，但实测超调 11 %、
+    #   调节 1.9 s，两项都超差——Z-N 偏激进是它的已知特性，按惯例回退。
+    #   回退后 Kp=3.0 Ki=1.2 Kd=0.12，z=1 与 z=3 下三项指标全部达标。
+    #
+    # 注意方案书表 6-4 给的 0.40/0.05/0.02 是**初值**不是整定结果：
+    # 实测 Kp=0.40 时闭环时间常数 2.75 s，4 s 内根本进不了 ±20 px 带
+    # （稳态还差 141 px）。这一条要写进 PID 整定记录。
+    kp: 3.00
+    ki: 1.20
+    kd: 0.12
+    gain_schedule: true     # ω = θ/(W·z)·u。关掉它变焦到 3× 会振荡（可现场演示）
+    integral_separation_px: 150.0   # |e| 超过它暂停积分累积（抗积分饱和）
+    integral_max: 500.0
+    deadband_px: 20.0       # 稳态偏差判据（方案书 §2.3）
+    rate_ttl_ms: 300        # PTZ_RATE 自失效时长
+  # === A3：复核采集模式 ===
+  # burst       = ICD v1.0 原样，同一位姿连拍 3 帧（抗抖动），0.6 s
+  # multiview   = 方案书原样，无条件三视角（抗反光），2.1 s
+  # conditional = 差异清单推荐，默认连拍，高光时才追加辅视角
+  capture:
+    mode: conditional       # conditional | burst | multiview
+    burst_n: 3
+    burst_interval_ms: 150
+    aux_offset_deg: 15.0    # 辅视角左右偏转角
+    aux_settle_ms: 500
+    aux_grab_ms: 200
+    highlight_trigger: 0.12 # highlight_ratio 超过它就追加辅视角
+    # perception 判断"该复核了"的变焦下限。ICD 没有接口把 mission_state
+    # 送到 perception，只能靠 IF-3 的状态组合推断，见 perception.node.verify_due
+    # verify_zoom_min 已删除。它原本是 perception 用来判断"正在复核"的变焦
+    # 门槛，但状态机下发的变焦是按需算的 clip(p_target/p_before, 1, max_zoom)，
+    # 两个常数各自独立定，凑在一起会锁死：p_target=120 时只有巡航密度
+    # ≤ 66.7 px 的目标才够得到 1.8×，比这更近的目标复核 100 % 在 VERIFY 超时。
+    # 现在改判"云台有没有离开巡航姿态"，见 perception.node.verify_due。
+    multiview_spread_limit_pct_fs: 0.5  # 三视角读数极差上限
+  # 十状态机的预算与超时（ICD §7.2，C1 取 ICD 一侧）
+  # CAPTURE 超时按 A3 放宽到 4.0 s，否则走辅视角路径必然超时进 ABORT
+  fsm:
+    budget_s:  {SUSPECT: 0.3, HALT_REQ: 2.0, AIM: 1.5, ZOOM: 1.5,
+                CAPTURE: 0.6, VERIFY: 2.5, PACK: 0.5, RESUME: 0.3}
+    timeout_s: {SUSPECT: 0.5, HALT_REQ: 4.0, AIM: 3.0, ZOOM: 2.5,
+                CAPTURE: 4.0, VERIFY: 5.0, PACK: 2.0, RESUME: 1.0, ABORT: 1.0}
+    suspect_confirm_frames: 3     # C10：统一为三帧
+  # 三重抑制 + 两条来自别处的抑制（ICD §7.3）
+  suppress:
+    track_cooldown_s: 60.0
+    waypoint_radius_m: 2.0
+    resume_silence_s: 3.0
+  # 复核预算（ICD §7.4）。T_r 由 fsm.budget_s 实时加总，不写死 8.8 s
+  #
+  # **这三个数按实车重新标过，不是任务书上的标称值。**
+  # 读了底盘固件（XiaoChe_APM32）之后才知道：MAX_SPD 0.1 m/s × 三档，
+  # 最高 0.3 m/s。按任务书的 200 m 路线算，光巡航就要 667 s，已经超过
+  # 600 s 的单轮上限——N_max = 0，一次复核都排不下。详见
+  # docs/底盘固件评审.md §6，那里列了三条出路。
+  #
+  # 这里取"缩短路线"这一条：60 m / 0.25 m/s（中档，留余量）→ 巡航 240 s，
+  # N_max = 39，余量充足。**这是待 D3 评审确认的设计变更**，不是既成事实；
+  # validate.py 第 4 项现在会在 N_max ≤ 0 时直接判失败，改回 200 m 会立刻红。
+  budget:
+    route_length_m: 60.0
+    cruise_speed_mps: 0.25
+    max_run_seconds: 600.0
+  # === A2：首版缺陷类别 ===
+  # 差异清单推荐：以方案书为准，渗漏油换成开关分合位（公开数据可得性）
+  first_release_classes: [PRESSURE_GAUGE, INDICATOR_LIGHT, SWITCH_HANDLE]
+
+# ---------------------------------------------------------------- 网关
+# 注意：参数范围**不在这里**。它们硬编码在 patrol/gateway/limits.py，
+# 网关不从任何配置读取范围值（ICD §4.3 / §10.2）。这里只有非安全项。
+gateway:
+  status_rate_hz: 20
+  enable_ptz_rate: true     # 是否接受 A1 的 PTZ_RATE 指令
+  audit_log: logs/gateway-audit.jsonl
+
+# ---------------------------------------------------------------- 上传
+uploader:
+  evidence_dir: evidence
+  transport: http           # http | mqtt   （http 单机零依赖，mqtt 接 mosquitto）
+  cloud_url: http://127.0.0.1:8000
+  mqtt:
+    host: 127.0.0.1
+    port: 1883
+    topic_tpl: patrol/{site_id}/{run_id}/evidence
+    qos: 1
+  site_id: SITE-01
+  retry_limit: 5
+  # === B3：证据包视频。任务书要求"图像、视频、定位、时间和识别结果" ===
+  video:
+    enabled: true
+    pre_seconds: 3.0
+    post_seconds: 2.0
+    fps: 10
+  retention:
+    max_days: 7
+    max_gb: 20.0
+
+cloud:
+  host: 127.0.0.1
+  port: 8000
+  db: cloud/patrol.db
+  storage: cloud/storage

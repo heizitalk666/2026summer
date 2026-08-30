@@ -1,0 +1,53 @@
+# 桩的行为契约。ICD §9。
+#
+# 桩不是"能跑就行"的假实现：它要主动制造真机上会出现的麻烦，否则在桩上
+# 调通的状态机一上真机就崩。联调时改这里切换故障场景，不改代码。
+stub:
+  chassis:
+    # 减速到停稳需要时间且不确定。下限 1500 ms 与 HALT_REQ 的 2000 ms 预算
+    # 之间只有 500 ms 余量，上限 2500 ms 已超出预算——这是故意的：超出预算
+    # 但不超时的情况必须在桩上出现，否则没人会去测"复核偶尔慢一点会怎样"。
+    stop_delay_ms: [1500, 2500]
+    ack_drop_rate: 0.02          # 串口/CAN 偶发丢包。一轮约 90 条指令，大概率丢一条
+    safety_event_rate_per_min: 0.05
+    safety_event_types: {OBSTACLE_DETECTED: 0.80, BUMPER_HIT: 0.15, ESTOP_PRESSED: 0.05}
+    brake_latency_ms: [40, 95]   # 底盘安全层实际响应，指标是 ≤100 ms
+    goto_error_sigma_m: 0.08
+    battery_drain_pct_per_min: 0.4
+    max_creep_m: 0.5
+    supports_task_level: true    # 为 false 时 mission 拒绝启动（开机自检）
+    has_safety_layer: true
+
+  ptz:
+    pan_speed_dps: 60.0          # 决定 AIM 耗时，也是 PID 的被控对象参数
+    tilt_speed_dps: 40.0
+    accel_dps2: 240.0            # 机械惯性，PID 整定要面对的东西
+    zoom_time_ms: [800, 1400]
+    focus_time_ms: [300, 700]
+    focus_fail_rate: 0.05
+    settle_jitter_deg: 0.15      # 到位后仍有残余抖动，验证连拍 3 帧的必要性
+    max_zoom: 3.0                # 改成 2.0 可验证开机自检是否真的会拒绝启动
+    zoom_is_optical: true
+    backlash_deg: 0.05           # 齿隙。换向时的死区，PID 里能看出来
+    # 4K 裁剪仿真的有效感光像素比 k = min(1, 2/z)。ICD §9.2。
+    # z=3 时 k=2/3，桩只有真机 2/3 的信息量，故桩上 d_max=4.16 m 而非 6.24 m。
+    # 标定素材要把表计目标布在 4 m 以内，否则 L2 读数会在桩上大面积失败，
+    # 而失败原因是仿真损失不是算法问题。
+    simulate_4k_crop: true
+    source_width: 3840
+
+  pose:
+    rate_hz: 20
+    noise_sigma_m: 0.02
+    lost_rate_per_min: 0.02      # 失锁必须注入，POSE_INVALID 抑制规则的正确性只能靠它验证
+    lost_duration_ms: [3000, 12000]
+    drift_mps: 0.05
+
+  camera:
+    max_fps: 30
+    grab_latency_ms: [8, 18]
+    # 外部视点的保鲜期。感知进程每收到一条 IF-3 就把"车在哪、云台指哪"回灌
+    # 给相机桩（见 ICamera.observe_state）——四个进程各有一套桩，只有网关那套
+    # 收得到指令，不回灌的话感知渲染的画面和它报的状态是两个世界。
+    # 超过这个时长没人喂就退回本地驱动，好让 viewer/calibrate/单测照常能跑。
+    viewpoint_ttl_ms: 500

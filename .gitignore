@@ -1,0 +1,26 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# 运行产物
+logs/
+evidence/
+cloud/patrol.db
+cloud/storage/
+*.jsonl
+
+# 工具产物（viewer / tune_pid / calibrate 的输出）
+out/
+
+# 训练产物
+training/datasets/
+training/runs/
+*.pt
+*.onnx
+*.rknn
+cloud/patrol.db-wal
+cloud/patrol.db-shm
+.coverage
+htmlcov/

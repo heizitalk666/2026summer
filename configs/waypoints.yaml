@@ -1,0 +1,17 @@
+# 巡检位标定表。网关启动时加载，GOTO_OBSERVE 的 waypoint_id 必须在表内，
+# 否则拒绝 UNKNOWN_WAYPOINT（ICD §4.3）。
+# 坐标为 map 系（ENU，x 东 y 北，原点在起始充电位）。
+#
+# WP-01..WP-09 排在 y = -3.18 的过道上，柜面在 y = +1.82，
+# 两者相距 5.00 m —— ICD §3.2 的标定算例就取在这里。
+waypoints:
+  - {id: WP-01, x_m:  0.50, y_m: -3.18, yaw_deg: 0.0, note: 起始段}
+  - {id: WP-02, x_m:  2.00, y_m: -3.18, yaw_deg: 0.0, note: 低压柜列首}
+  - {id: WP-03, x_m:  6.00, y_m: -3.18, yaw_deg: 0.0, note: 低压柜列中}
+  - {id: WP-04, x_m: 10.00, y_m: -3.18, yaw_deg: 0.0, note: 低压柜列尾}
+  - {id: WP-05, x_m: 14.00, y_m: -3.18, yaw_deg: 0.0, note: 变压器室外侧}
+  - {id: WP-06, x_m: 16.00, y_m: -3.18, yaw_deg: 0.0, note: 端头}
+  - {id: WP-07, x_m: 12.43, y_m: -3.18, yaw_deg: 0.0, note: 压力表观测位}
+  - {id: WP-08, x_m:  8.00, y_m: -3.18, yaw_deg: 0.0, note: 指示灯屏观测位}
+  - {id: WP-09, x_m:  4.00, y_m: -3.18, yaw_deg: 0.0, note: 开关柜观测位}
+  - {id: WP-10, x_m:  0.00, y_m: -3.18, yaw_deg: 0.0, note: 充电位}

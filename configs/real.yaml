@@ -1,0 +1,89 @@
+# 真机参数。**只在 driver_mode: real 时才有意义**，桩模式整段不读。
+#
+# 硬件还没到，这里的端口名与限值都是按 docs/底盘串口协议.md v0.1 预填的草案。
+# 到货后要改的就是这几行——上位机代码一行不用动，这正是 ICD §8.7 那个
+# "唯一分支点"设计要换来的东西。
+#
+# 先用假小车联调（**没有硬件时最有力的一层演示**：走的是真驱动、真协议栈，
+# 只有链路对面换成了电脑上的仿真底盘）：
+#
+#   POSIX：  python -m patrol.tools.fakecar --pty    # 打印 /dev/pts/N
+#            port: /dev/pts/3
+#
+#   Windows：python -m patrol.tools.fakecar --tcp    # 打印 tcp://127.0.0.1:5760
+#            port: tcp://127.0.0.1:5760
+#
+# 再把 system.yaml 的 driver_mode 改成 real。**Windows 上必须走 tcp://**：
+# os.openpty 是 POSIX 专有的，伪终端那条路在 Windows 上根本构造不出来。
+# 端口串以 tcp:// 开头时 drivers/real/serial_link.py:open_link 自动切链路实现，
+# 驱动代码一行不动。
+real:
+  serial:
+    chassis:
+      # 真串口写 /dev/ttyUSB0（Linux）或 COM3（Windows）；
+      # 假小车联调写 fakecar 打印的那一行（/dev/pts/N 或 tcp://127.0.0.1:5760）
+      port: /dev/ttyUSB0
+      baudrate: 115200          # 8N1，无流控
+      read_timeout_s: 0.05
+      # 上位机 ≥1 Hz 发 PNG；底盘 3 s 收不到就自行减速停车。
+      # 这是**底盘侧**的独立保护，与网关看门狗是两回事：网关看门狗管
+      # "AI 进程死了"，保活管"串口断了或整个 RK3576 死了"——后者网关
+      # 自己也救不了，只能由底盘兜底。两级都要有。
+      ping_period_s: 0.5
+      keepalive_s: 3.0
+      # 状态帧超过这个时长没来就报 FAULT。上位机据此判断"车停稳了"，
+      # 拿过期数据会在车还在动的时候开始变焦抓拍。
+      status_timeout_s: 1.0
+      # **下面这几个数来自实车固件 XiaoChe_APM32，不是估的**（见 docs/底盘固件评审.md）。
+      # 这是本文件里唯一"已经确定"的一段，其余端口名之类仍是草案。
+      supports_task_level: true # 为 false 时 mission 拒绝启动（ICD §8.2）。
+                                # 现有固件其实**还不支持**——它只有 PS2 手柄，没有
+                                # 任何串口指令通路。这里填 true 是在描述"APM32 上
+                                # 的适配层写完之后应当满足的契约"，也是 fakecar
+                                # 已经满足的契约。真接上没改过的固件会连状态帧都
+                                # 收不到，网关自检就过不去，不会带病上路。
+      has_safety_layer: true    # PS2 掉线约 250 ms 自行停车，已有
+      max_speed_mps: 0.30       # 固件 MAX_SPD 0.1 m/s × 三档（gear 0–2）。
+                                # 瓶颈是这个人为设的宏，不是电机——限幅 210 rpm
+                                # 对应轮周速 2.26 m/s，远没到头
+      max_creep_m: 0.5          # 硬件上限。网关那道 0.5 m 是任务级限值，两道独立
+    # 麦克纳姆四轮底盘的物理参数，用于轮式里程计与横移。取自
+    # can_motor.c 第 230–234 行。**注意固件里 L 的注释是错的**：它写"中心点到
+    # 轮子的距离"，实际值是 lx+ly；真正的中心到轮距离是 WHEEL_DISTANCE/2。
+    kinematics:
+      wheel_radius_m: 0.1027    # 轮径 0.2054 m 的一半
+      lx_plus_ly_m: 0.3652      # = 对角轮距 0.5165 / √2，对**方形**底盘成立
+      holonomic: true           # 麦轮，可横移：靠近柜面不必转身
+      motor_rpm_limit: 210      # limitWheelSpeeds 的限幅值
+    ptz:
+      # 云台多半会随整机附一套厂商协议（Pelco-D / VISCA / 私有）。
+      # 到货后只需换掉 ptz_serial.py 里的 _encode_*，语义层不用动。
+      port: /dev/ttyUSB1
+      baudrate: 115200
+      read_timeout_s: 0.05
+      status_timeout_s: 1.0
+      pan_range_deg: [-170.0, 170.0]
+      tilt_range_deg: [-30.0, 60.0]
+      # **max_zoom < 3.0 或 zoom_is_optical: false 时系统拒绝启动。**
+      # 数字变焦不增加感光像素，像素密度公式对它不成立——这条把
+      # "5 m 处 15 cm 表盘要 3× 变焦才够 120 px"从纸面结论变成了开机检查。
+      max_zoom: 3.0
+      zoom_is_optical: true
+      max_pan_dps: 60.0         # 为 0 时 mission 自动退回 servo.mode=open_loop
+      max_tilt_dps: 40.0
+  camera:
+    device: 0                   # /dev/video0；RK3576 上最终换 MPP 硬解
+    fourcc: MJPG                # YUYV 在 1080p 下多数 UVC 相机只能 5 fps
+    max_fps: 30
+    grab_timeout_s: 0.5
+  localizer:
+    # 定位来自底盘的里程计，经同一条串口上来，不是独立设备。
+    # **车上没有激光雷达**，位置是拿 path_progress 沿标定路线插出来的航位
+    # 推算，所以 pose.source 恒为 ODOM_ONLY。将来上了 SLAM 模块再改。
+    #
+    # route_points 留空则按 waypoints.yaml 的顺序。**真机模式不读 scene.\***，
+    # 那是虚拟配电室的配置。
+    route_points: []
+    rate_hz: 20.0
+    cov_trace_nominal: 0.014
+    cov_trace_odom: 0.35

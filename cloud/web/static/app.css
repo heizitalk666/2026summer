@@ -1,0 +1,117 @@
+:root{
+  --ground:#f6f7f9; --surface:#fff; --surface-2:#f0f2f5;
+  --ink:#14181f; --ink-2:#4a5462; --ink-3:#78828f;
+  --rule:#dce0e7; --accent:#a85f00;
+  --ok:#2c6a4a; --warn:#a85f00; --crit:#a4271e; --info:#2f5f80;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --ground:#10131a; --surface:#171b23; --surface-2:#1d222b;
+  --ink:#e3e7ed; --ink-2:#a9b2bf; --ink-3:#7c8694;
+  --rule:#262c36; --accent:#e5a34a;
+  --ok:#6fbf92; --warn:#e5a34a; --crit:#e8756b; --info:#7fb2d6;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);
+  font:15px/1.6 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
+header{padding:20px 24px 0;border-bottom:1px solid var(--rule);background:var(--surface)}
+h1{font-size:1.15rem;margin:0 0 14px;font-weight:700}
+h1 .sub{color:var(--ink-3);font-weight:400;font-size:.9rem;margin-left:8px}
+nav{display:flex;gap:4px}
+.tab{background:none;border:0;border-bottom:2px solid transparent;padding:8px 14px;
+  color:var(--ink-2);cursor:pointer;font-size:.92rem;font-family:inherit}
+.tab.active{color:var(--ink);border-bottom-color:var(--accent);font-weight:600}
+.badge{display:inline-block;min-width:18px;padding:0 5px;border-radius:9px;
+  background:var(--crit);color:#fff;font-size:.72rem;font-family:var(--mono)}
+main{padding:20px 24px 60px;max-width:1240px}
+.panel.hidden,.drawer.hidden{display:none}
+.hint{color:var(--ink-2);font-size:.88rem;background:var(--surface);
+  border-left:3px solid var(--accent);padding:10px 14px;margin:0 0 16px;max-width:70ch}
+.filters,.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+select,input,button{font:inherit;padding:6px 10px;border:1px solid var(--rule);
+  border-radius:3px;background:var(--surface);color:var(--ink)}
+button{cursor:pointer}
+.chk{display:flex;gap:6px;align-items:center;font-size:.9rem;color:var(--ink-2)}
+.scroll{overflow-x:auto;border:1px solid var(--rule);background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:.88rem;min-width:720px}
+th,td{text-align:left;padding:8px 12px;border-bottom:1px solid var(--rule)}
+thead th{font-family:var(--mono);font-size:.7rem;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--ink-3);background:var(--surface-2)}
+td.num,th.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+tbody tr:hover{background:var(--surface-2)}
+.pill{display:inline-block;padding:1px 7px;border-radius:2px;font-size:.72rem;
+  font-family:var(--mono);border:1px solid currentColor}
+.v-CONFIRMED_DEFECT,.s-CRITICAL{color:var(--crit)}
+.v-READING_ABNORMAL,.s-WARN,.v-UNKNOWN_ANOMALY{color:var(--warn)}
+.v-READING_OK,.s-INFO{color:var(--ok)}
+.v-FALSE_ALARM{color:var(--info)}
+.v-INCONCLUSIVE{color:var(--ink-3)}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
+  gap:1px;background:var(--rule);border:1px solid var(--rule);margin-bottom:18px}
+.card{background:var(--surface);padding:14px 16px}
+.card dt{font-family:var(--mono);font-size:.68rem;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--ink-3);margin-bottom:4px}
+.card dd{margin:0;font-size:1.5rem;font-family:var(--mono);font-weight:600}
+.card .note{font-size:.76rem;color:var(--ink-3);margin-top:4px}
+.drawer{position:fixed;top:0;right:0;width:min(620px,94vw);height:100%;
+  background:var(--surface);border-left:1px solid var(--rule);overflow-y:auto;
+  padding:24px;box-shadow:-8px 0 32px rgba(0,0,0,.14);z-index:20}
+.close{position:absolute;top:12px;right:14px;border:0;background:none;
+  font-size:1.5rem;line-height:1;color:var(--ink-3)}
+.drawer h2{font-size:1rem;margin:0 0 12px}
+.drawer dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;
+  font-size:.86rem;margin:0 0 16px}
+.drawer dt{color:var(--ink-3);font-family:var(--mono);font-size:.76rem}
+.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-bottom:16px}
+.gallery figure{margin:0}
+.gallery img{width:100%;border:1px solid var(--rule);display:block}
+.gallery figcaption{font-family:var(--mono);font-size:.68rem;color:var(--ink-3);margin-top:3px}
+.timeline{font-family:var(--mono);font-size:.78rem}
+.timeline div{display:flex;justify-content:space-between;padding:2px 0;
+  border-bottom:1px dotted var(--rule)}
+.reviewCard{background:var(--surface);border:1px solid var(--rule);padding:14px;margin-bottom:10px}
+.reviewCard .acts{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.log{font-family:var(--mono);font-size:.76rem;color:var(--ink-2);margin-top:8px}
+
+/* ---- 实时页 ---- */
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;
+  background:var(--ok);margin-left:4px;vertical-align:middle}
+.dot.off{background:var(--ink-3)}
+.dot.stale{background:var(--warn)}
+.live-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:18px}
+@media (max-width:900px){.live-grid{grid-template-columns:1fr}}
+.live-col h3{font-size:.9rem;margin:0 0 8px;font-weight:600}
+.live-col h3 .muted{font-weight:400}
+.muted{color:var(--ink-3);font-size:.84rem}
+.live-log{max-height:300px}
+/* 告警区放在指令流水上面，给它固定高度：它条目少但重要，
+   不该被下面刷得飞快的指令流水挤没 */
+.live-alerts{max-height:150px;margin-bottom:10px}
+.live-models{max-height:180px}
+.maplegend{color:var(--ink-3);font-size:.76rem;margin:6px 0 12px;
+  display:flex;gap:14px;flex-wrap:wrap}
+.maplegend i{font-style:normal;color:var(--accent)}
+/* 覆盖全局 table 的 min-width:720px——实时页是两栏布局，每栏只有
+   五百多像素，720 的下限会让耗时那一列永远在可视范围之外 */
+.live-log table,.live-models table,.live-alerts table{font-family:var(--mono);font-size:.78rem;
+  table-layout:fixed;width:100%;min-width:0}
+/* 固定列宽，否则"指令"那列会把耗时挤出可视范围——而每条指令
+   1–2 ms 走完整条校验链，正是演示时要说的数 */
+#liveTbl th:nth-child(1),#liveTbl td:nth-child(1){width:56px}
+#liveTbl th:nth-child(2),#liveTbl td:nth-child(2){width:52px}
+#liveTbl th:nth-child(4),#liveTbl td:nth-child(4){width:72px;text-align:right}
+#liveTbl td:nth-child(3){white-space:normal;word-break:break-word}
+#liveDet th:nth-child(1),#liveDet td:nth-child(1){width:38%}
+.live-log tr.bad td,.live-alerts tr.bad td{color:var(--crit)}
+.live-log td.t,.live-alerts td.t{color:var(--ink-3);white-space:nowrap}
+.live-log td.tgt{white-space:nowrap}
+#liveMap{width:100%;height:auto;max-height:300px;background:var(--surface);
+  border:1px solid var(--rule)}
+#liveMap .aisle{stroke:var(--rule);stroke-width:.06;fill:none;stroke-dasharray:.25 .18}
+#liveMap .cab{fill:var(--surface-2);stroke:var(--rule);stroke-width:.04}
+#liveMap .wp{fill:var(--ink-3)}
+#liveMap .wplbl{fill:var(--ink-3);font-size:.28px;font-family:var(--mono)}
+#liveMap .tgt{fill:var(--info)}
+#liveMap .fov{fill:var(--accent);opacity:.18}
+#liveMap .car{fill:var(--accent)}
+#liveMap .carhead{stroke:var(--accent);stroke-width:.09}

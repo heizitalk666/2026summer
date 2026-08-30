@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://patrol.local/schemas/command_ack.schema.json",
+  "title": "CommandAck",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "msg_type",
+    "cmd_id",
+    "ts_mono_ns",
+    "result",
+    "reject_code",
+    "reject_detail",
+    "checks",
+    "exec_handle"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "msg_type": {
+      "const": "COMMAND_ACK"
+    },
+    "cmd_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "ts_mono_ns": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "result": {
+      "enum": [
+        "ACCEPTED",
+        "REJECTED",
+        "PREEMPTED"
+      ]
+    },
+    "reject_code": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "enum": [
+            "NOT_IN_WHITELIST",
+            "SCHEMA_INVALID",
+            "SCHEMA_VERSION_MISMATCH",
+            "PARAM_MISSING",
+            "PARAM_OUT_OF_RANGE",
+            "UNKNOWN_WAYPOINT",
+            "STATE_CONFLICT",
+            "SAFETY_OVERRIDE",
+            "HEARTBEAT_LOST",
+            "DRIVER_NOT_READY",
+            "DRIVER_TIMEOUT",
+            "ESTOP_ACTIVE"
+          ]
+        }
+      ]
+    },
+    "reject_detail": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 256
+    },
+    "checks": {
+      "type": "object",
+      "required": [
+        "whitelist",
+        "schema",
+        "range",
+        "state_conflict",
+        "safety_override"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "whitelist": {
+          "$ref": "#/$defs/check"
+        },
+        "schema": {
+          "$ref": "#/$defs/check"
+        },
+        "range": {
+          "$ref": "#/$defs/check"
+        },
+        "state_conflict": {
+          "$ref": "#/$defs/check"
+        },
+        "safety_override": {
+          "$ref": "#/$defs/check"
+        }
+      }
+    },
+    "exec_handle": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "result": {
+            "const": "ACCEPTED"
+          }
+        },
+        "required": [
+          "result"
+        ]
+      },
+      "then": {
+        "properties": {
+          "reject_code": {
+            "type": "null"
+          },
+          "exec_handle": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "result": {
+            "const": "REJECTED"
+          }
+        },
+        "required": [
+          "result"
+        ]
+      },
+      "then": {
+        "properties": {
+          "reject_code": {
+            "type": "string"
+          },
+          "exec_handle": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "check": {
+      "enum": [
+        "PASS",
+        "FAIL",
+        "SKIP"
+      ]
+    }
+  }
+}
