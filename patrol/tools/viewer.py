@@ -5,6 +5,15 @@
     python -m patrol.tools.viewer --headless --out out/   # 无显示器：存帧
     python -m patrol.tools.viewer --demo-zoom --out out/  # 存一张变焦对比图
     python -m patrol.tools.viewer --live                  # 跟着正在跑的系统看
+    python -m patrol.tools.viewer --thirdperson           # 并排：车载视角 + 第三人称
+    python -m patrol.tools.viewer --demo-thirdperson --out out/   # 视锥收紧对比图
+
+**第三人称是第四个显示面。**前三个（车载视角、终端指令流水、云端网页）都能
+回答"它看见什么"和"它被下发了什么"，但都回答不了 **"它在看哪儿"**——因为
+相机长在车上，看不见自己。第三人称把车身、云台朝向、当前视锥画在同一张图里，
+视锥的张角随变焦收紧（巡航 60°，复核 3× 时 21.8°）并**正好落在被复核的那块
+表上**。"指令下去 → 云台转了 → 视场套住目标"这条因果链，到这里才是可见的。
+没有硬件时，这是最接近"看着车干活"的东西。
 
 键位：A/D 左右转，W/S 俯仰，Q/E 变焦，空格 暂停/恢复行驶，
       H 云台归位，R 强制安全事件，L 强制定位失锁，ESC 退出。
@@ -38,17 +47,20 @@ from patrol.drivers.factory import build_drivers
 from patrol.scene.optics import pixel_density
 from patrol.tools.textdraw import cjk_available, draw_text, panel, text_size
 
-PMIN = 120.0
+# 仅作 cfg 缺失时的兜底。判据线的主人是 configs/camera.yaml 的
+# optics.pixel_density_min_px，取值一律走 cfg.get(..., PMIN_DEFAULT)。
+PMIN_DEFAULT = 120.0
 
 
 def annotate(img, targets, zoom, cfg, chassis, ptz, pose, hint="",
              *, show_bar: bool = True):
     w = img.shape[1]
     hfov1x = float(cfg.get("optics.hfov_at_1x_deg", 60.0))
+    pmin = float(cfg.get("optics.pixel_density_min_px", PMIN_DEFAULT))
     for m in targets:
         x1, y1, x2, y2 = [int(round(v)) for v in m["bbox"]]
         p = pixel_density(w, m["target_size_m"], zoom, m["distance_m"], hfov1x)
-        ok = p >= PMIN
+        ok = p >= pmin
         col = (110, 210, 110) if ok else (80, 140, 240)
         cv2.rectangle(img, (x1, y1), (x2, y2), col, 2)
         # 用 textdraw 而不是 cv2.putText：后者画不了中文，"达标 / 需复核"
@@ -221,7 +233,14 @@ def demo_zoom(cfg, out: Path) -> None:
     wp = world.waypoints["WP-07"]
     tgt = world.by_id("TGT-01")
     from patrol.scene.optics import PinholeCamera, hfov_at_zoom
-    cam = PinholeCamera(1920, 1080, hfov_at_zoom(60.0, 1.0),
+    # 画幅、视场角、判据线全部取自 configs/camera.yaml。这张对比图是答辩材料
+    # 里最常被引用的一幕，参数一旦与配置脱钩，图上标的 p 就不再是系统实际用的
+    # 那个 p。
+    cw = int(cfg.get("camera.width", 1920))
+    ch = int(cfg.get("camera.height", 1080))
+    hfov1x = float(cfg.get("optics.hfov_at_1x_deg", 60.0))
+    pmin = float(cfg.get("optics.pixel_density_min_px", PMIN_DEFAULT))
+    cam = PinholeCamera(cw, ch, hfov_at_zoom(hfov1x, 1.0),
                         (wp.x_m, wp.y_m, world.camera_height_m), wp.yaw_deg, 0, 0)
     pan, tilt = cam.aim_offset_deg(tgt.position)
 
@@ -230,16 +249,23 @@ def demo_zoom(cfg, out: Path) -> None:
         img, meta = r.render(pose_xy_yaw=(wp.x_m, wp.y_m, wp.yaw_deg),
                              pan_deg=pan, tilt_deg=tilt, zoom=z)
         m = next(m for m in meta if m["target_id"] == "TGT-01")
-        p = pixel_density(1920, m["target_size_m"], z, m["distance_m"], 60.0)
+        p = pixel_density(cw, m["target_size_m"], z, m["distance_m"], hfov1x)
         x1, y1, x2, y2 = [int(round(v)) for v in m["bbox"]]
-        ok = p >= PMIN
+        ok = p >= pmin
         col = (110, 210, 110) if ok else (80, 140, 240)
         cv2.rectangle(img, (x1 - 6, y1 - 6), (x2 + 6, y2 + 6), col, 3)
-        for txt, yy, sc in ((label, 60, 1.4),
-                            ("p = %.1f px  (%s 120 px 判据)" % (p, "≥" if ok else "<"), 118, 1.0),
-                            ("d = %.2f m   实测框宽 %.1f px" % (m["distance_m"], x2 - x1), 168, 0.9)):
-            cv2.putText(img, txt, (40, yy), cv2.FONT_HERSHEY_SIMPLEX, sc, (20, 20, 20), 6, cv2.LINE_AA)
-            cv2.putText(img, txt, (40, yy), cv2.FONT_HERSHEY_SIMPLEX, sc, col, 2, cv2.LINE_AA)
+        # 用 draw_text 而不是 cv2.putText，理由与 annotate() 里那条完全相同：
+        # cv2 画不了中文，"巡航态 / 复核态 / 判据 / 实测框宽"会整串变成 ?????。
+        # 这张图是方案立论的那一幕（5 m 处 50 px 读不准 → 变焦到 150 px 才够
+        # 得着 0.5 % FS），标题糊掉等于这张图白出。draw_text 内部在找不到 CJK
+        # 字体时会自己退回 ASCII 说法，不会再出问号。
+        # org 是**左上角**不是基线，所以 y 比原来的基线值小一个字号。
+        for txt, y_top, size in (
+                (label, 18, 42),
+                ("p = %.1f px  (%s 120 px 判据)" % (p, "≥" if ok else "<"), 88, 30),
+                ("d = %.2f m   实测框宽 %.1f px" % (m["distance_m"], x2 - x1), 141, 27)):
+            draw_text(img, txt, (40, y_top), size=size, color=col,
+                      stroke=(20, 20, 20), stroke_width=3)
         panes.append(img)
         print("  z=%.0f  实测 bbox 宽 %.1f px，公式 p=%.1f px" % (z, x2 - x1, p))
     out.mkdir(parents=True, exist_ok=True)
@@ -248,11 +274,97 @@ def demo_zoom(cfg, out: Path) -> None:
     print("已存", path)
 
 
+def demo_thirdperson(cfg, out: Path) -> None:
+    """第三人称版的变焦对比图：同一台车，z=1 与 z=3，看**视锥**怎么收紧。
+
+    和 demo_zoom 是一对：那张说"表盘从 50 px 变成 150 px"，这张说"视场从
+    60° 收到 21.8°，并且正好套住那块表"。同一件事的两个侧面——一个从车的
+    眼睛里看，一个从旁边看着车。答辩讲"停车→对准→变焦→再看一眼"时，这两张
+    图放一起，不需要再解释第三句话。
+    """
+    from patrol.scene.optics import PinholeCamera, hfov_at_zoom
+    from patrol.scene.render import RenderOptions, SceneRenderer
+    from patrol.scene.world import World
+
+    world = World(cfg)
+    hfov1x = float(cfg.get("optics.hfov_at_1x_deg", 60.0))
+    r = SceneRenderer(world, RenderOptions(width=1280, height=720,
+                                           simulate_4k_crop=False,
+                                           hfov_at_1x_deg=hfov1x))
+    wp = world.waypoints["WP-07"]
+    tgt = world.by_id("TGT-01")
+    cam = PinholeCamera(int(cfg.get("camera.width", 1920)),
+                        int(cfg.get("camera.height", 1080)),
+                        hfov_at_zoom(hfov1x, 1.0),
+                        (wp.x_m, wp.y_m, world.camera_height_m), wp.yaw_deg, 0, 0)
+    pan, tilt = cam.aim_offset_deg(tgt.position)
+
+    panes = []
+    for z, label in ((1.0, "巡航态  z=1x"), (3.0, "复核态  z=3x")):
+        img = r.render_thirdperson(pose_xy_yaw=(wp.x_m, wp.y_m, wp.yaw_deg),
+                                   pan_deg=pan, tilt_deg=tilt, zoom=z,
+                                   size=(1280, 720))
+        hf = hfov_at_zoom(hfov1x, z)
+        col = (110, 210, 110) if z > 1.5 else (80, 140, 240)
+        draw_text(img, label, (28, 24), size=40, color=col,
+                  stroke=(20, 20, 20), stroke_width=3)
+        draw_text(img, "视场 %.1f°   （广角端 %.0f°）" % (hf, hfov1x),
+                  (28, 76), size=28, color=col, stroke=(20, 20, 20), stroke_width=3)
+        panes.append(img)
+        print("  z=%.0f  视场 %.2f°" % (z, hf))
+
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / "thirdperson_compare.png"
+    cv2.imwrite(str(path), np.hstack(panes))
+    print("已存", path)
+
+
+def make_thirdperson(cfg, camera):
+    """第三人称渲染器，拿不到场景时返回 None（真机模式下就没有场景）。
+
+    **必须复用相机桩持有的那个 World。**另建一份的话，改真值改的是另一个
+    对象，第三人称里表针不动、车也对不上——calibrate.py 的注释里记着同一个坑。
+    """
+    world = getattr(camera, "world", None)
+    if world is None:
+        return None
+    from patrol.scene.render import RenderOptions, SceneRenderer
+    return SceneRenderer(world, RenderOptions(
+        width=960, height=540, simulate_4k_crop=False,
+        hfov_at_1x_deg=float(cfg.get("optics.hfov_at_1x_deg", 60.0))))
+
+
+def split_view(onboard, tp_renderer, pose, st, *, pane=(960, 540)):
+    """左：车载视角（它看见什么）。右：第三人称（它在看哪儿）。
+
+    两块拼在一张图上才是这个模式的意义。分开看时，"云台转了"和"画面变了"
+    是两条要靠脑补连起来的信息；并排放，因果关系一眼就成立——而这恰恰是
+    没有硬件时最难让人相信的那一环。
+    """
+    w, h = pane
+    left = cv2.resize(onboard, (w, h), interpolation=cv2.INTER_AREA)
+    if tp_renderer is None:
+        return left
+    right = tp_renderer.render_thirdperson(
+        pose_xy_yaw=(pose.x_m, pose.y_m, pose.yaw_deg),
+        pan_deg=st.pan_deg, tilt_deg=st.tilt_deg, zoom=st.zoom, size=(w, h))
+    # 标在底部：annotate() 的状态栏占着左上角，两边都写会糊成一团
+    draw_text(left, "车载视角  它看见什么  z=%.1fx" % st.zoom,
+              (14, h - 38), size=26, color=(235, 238, 244))
+    draw_text(right, "第三人称  它在看哪儿  视场 %.1f°" % st.hfov_deg,
+              (14, h - 38), size=26, color=(235, 238, 244))
+    return np.hstack([left, right])
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="虚拟配电室预览")
     ap.add_argument("--config", default=None)
     ap.add_argument("--headless", action="store_true", help="不开窗口，存帧到 --out")
+    ap.add_argument("--thirdperson", action="store_true",
+                    help="并排显示车载视角与第三人称（含车身与视锥）")
     ap.add_argument("--demo-zoom", action="store_true", help="只出一张变焦对比图")
+    ap.add_argument("--demo-thirdperson", action="store_true",
+                    help="只出一张第三人称对比图：视锥随变焦收紧")
     ap.add_argument("--live", action="store_true",
                     help="跟着正在跑的系统看：订阅 IF-3、叠加下发的指令，不自己控云台")
     ap.add_argument("--out", default="out", help="输出目录")
@@ -266,6 +378,9 @@ def main() -> int:
 
     if a.demo_zoom:
         demo_zoom(cfg, out)
+        return 0
+    if a.demo_thirdperson:
+        demo_thirdperson(cfg, out)
         return 0
     if a.live:
         return live_loop(cfg, a)
@@ -288,11 +403,17 @@ def main() -> int:
     t_end = time.time() + a.seconds
     n = 0
     try:
+        tp = make_thirdperson(cfg, camera) if a.thirdperson else None
+        if a.thirdperson and tp is None:
+            print("拿不到场景（真机模式下没有虚拟世界），第三人称已关闭")
         while time.time() < t_end:
             t0 = time.time()
             f = camera.grab()
+            pose_now = loc.get_pose()
             img = annotate(f.image, camera.last_targets(), ptz.status().zoom,
-                           cfg, chassis, ptz, loc.get_pose(), hint)
+                           cfg, chassis, ptz, pose_now, hint)
+            if tp is not None:
+                img = split_view(img, tp, pose_now, ptz.status())
             if headless:
                 cv2.imwrite(str(out / ("frame_%04d.jpg" % n)), img,
                             [cv2.IMWRITE_JPEG_QUALITY, 88])

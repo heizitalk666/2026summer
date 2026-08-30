@@ -73,6 +73,7 @@ READING_OK                   5       0.4458       2.2835
 | **每个文件是干嘛的**、一次复核的完整数据流 | [`docs/代码地图.md`](docs/代码地图.md) |
 | **剩下四周谁做什么**、验收标准与风险 | [`docs/后续计划与分工.md`](docs/后续计划与分工.md) |
 | **第一次上手、装环境、跑通** | [`docs/新手上路.md`](docs/新手上路.md) |
+| **怎么把这套系统演给人看**（三块屏幕、支线演示、出图） | [`docs/演示指南.md`](docs/演示指南.md) |
 | 系统怎么搭的、四个进程怎么通信 | [`docs/架构说明.md`](docs/架构说明.md) |
 | **四类 AI 模型怎么配合把识别做好** | [`docs/多模型协同.md`](docs/多模型协同.md) |
 | 每一步命令怎么跑、出什么 | [`docs/操作步骤.md`](docs/操作步骤.md) |
@@ -109,7 +110,7 @@ patrol/
 cloud/          FastAPI + SQLite 台账、人工复核、模型版本登记
 configs/        system / scene / stub / waypoints / camera / real
 training/       合成数据集生成、检测/分割/异常训练、ONNX 与 RKNN 导出
-tests/          399 项
+tests/          496 条用例（383 个测试函数，参数化展开后 496）
 ```
 
 ---
@@ -117,6 +118,10 @@ tests/          399 项
 ## 四个可以现场演示的东西
 
 方案书说安全设计的说服力不在于声明，在于能当场演示。这四条都能当场跑：
+
+> 完整的演示流程（三块屏幕怎么摆、每块说什么、支线演示、给 PPT 出图）见
+> [`docs/演示指南.md`](docs/演示指南.md)。**Windows 上开 3D 窗口要加
+> `DISPLAY=win` 前缀**，原因写在那份文档第 0 节。
 
 ```bash
 # 越界指令被拒，并留下逐项校验的审计记录
@@ -151,9 +156,19 @@ real.serial.chassis.port: /dev/ttyUSB0    # 端口名、波特率、云台限位
 同一套协议，并复用桩的故障注入）：
 
 ```bash
-python -m patrol.tools.fakecar --pty       # 打印出 /dev/pts/N，填进 configs/real.yaml
-pytest tests/test_serial_protocol.py -v    # 或者直接跑这 19 项，不需要任何设备
+python -m patrol.tools.fakecar --pty       # POSIX：打印 /dev/pts/N
+python -m patrol.tools.fakecar --tcp       # Windows：打印 tcp://127.0.0.1:5760
+# 把打印出来的那一行填进 configs/real.yaml 的 real.serial.chassis.port，
+# 再把 configs/system.yaml 的 driver_mode 改成 real
+pytest tests/test_serial_protocol.py tests/test_fakecar_tcp.py -v   # 不需要任何设备
 ```
+
+**Windows 上必须用 `--tcp`**：`os.openpty()` 是 POSIX 专有的，`--pty` 会直接
+失败（不给参数时按平台自动选，照着敲哪条都不会踩坑）。TCP 环回保住了"假小车
+是独立进程、字节真的过内核"这个关键性质，分帧、CRC、超时、重传、2 % ACK 丢包
+注入全部照原样发生；换掉的只是承载。**它不能替代物理层**——没有波特率、没有
+线路噪声、没有帧错误，TCP 还保证有序不丢。所以它证明协议栈与时序逻辑正确，
+不证明电气特性。
 
 ---
 
@@ -191,7 +206,7 @@ python -m patrol.tools.viewer --live         # 预览窗口，画面上叠加指
 | 识别 | 四路模型（检测 / 分割 / OCR / 异常）+ 显式仲裁全部在跑，见 [`docs/多模型协同.md`](docs/多模型协同.md) |
 | OCR 互证 | 已在跑真模型（RapidOCR，离线自带权重）；实测 90 px 以上可读，误判冲突全档为 0 |
 | 合成数据集 | 检测框 / 分割掩膜 / OCR / L3 正常集一次产出，掩膜与图像逐像素对齐 |
-| 测试 | 399 项通过，`validate` 51 项全绿 |
+| 测试 | 496 条用例，`validate` 51 项全绿 |
 | YOLO 权重 | 接口与加载逻辑就位，默认走合成检测器，等训练 |
 | RKNN 上板 | 导出脚本就位，等板子 |
 

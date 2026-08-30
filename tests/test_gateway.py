@@ -237,13 +237,36 @@ def test_heartbeat_constants_match_icd():
 
 
 # ---------------------------------------------------------------- 安全事件
+def _wait_until(cond, timeout_s: float = 5.0, poll_s: float = 0.005) -> bool:
+    """轮询到条件成立。**用来取代 time.sleep(固定值)。**
+
+    原来这几处写的是 `time.sleep(0.05)`，赌的是"安全事件 50 ms 内一定传到
+    网关看得见的地方"。这个赌注在空闲机器上成立，机器一忙就不成立：底盘桩
+    的状态由**后台线程**推进，线程被推迟，`status().safety_layer_active`
+    就还没翻上来，于是 RESUME 被放行、断言挂掉。实测满负载下 3/3 必挂。
+
+    轮询版在空闲时反而更快（条件一成立立刻返回，通常几毫秒就够），只在机器
+    忙的时候才多等；而且它等到的是**事实**，不是一个猜出来的时长。
+    """
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < timeout_s:
+        try:
+            if cond():
+                return True
+        except Exception:                       # noqa: BLE001
+            pass                                # 状态还没就绪，下一轮再看
+        time.sleep(poll_s)
+    return False
+
+
 def test_safety_event_blocks_motion_commands(gw):
     """底盘安全层介入期间，网关拒绝一切运动指令，但云台指令放行。
 
     云台放行是有意的：复核中止时恰恰需要把云台归位。
     """
     gw.chassis.force_safety_event("OBSTACLE_DETECTED")
-    time.sleep(0.05)
+    assert _wait_until(lambda: gw.chassis.status().safety_layer_active), \
+        "安全事件没能在超时内反映到底盘状态里，后面的断言无从谈起"
     assert gw.handle_command(mk("RESUME", {}))["reject_code"] == "SAFETY_OVERRIDE"
     ack = gw.handle_command(mk("PTZ_SET", {"pan_deg": 0.0, "tilt_deg": 0.0,
                                            "zoom": 1.0, "speed": "NORMAL"}))
@@ -253,11 +276,14 @@ def test_safety_event_blocks_motion_commands(gw):
 def test_estop_requires_manual_clear(gw):
     """急停是唯一不能自恢复的安全事件。"""
     gw.chassis.force_safety_event("ESTOP_PRESSED")
-    time.sleep(0.05)
+    assert _wait_until(lambda: gw.chassis.status().safety_layer_active), \
+        "急停没能在超时内反映到底盘状态里"
     ack = gw.handle_command(mk("RESUME", {}, issued_by="WATCHDOG"))
     assert ack["reject_code"] in ("ESTOP_ACTIVE", "SAFETY_OVERRIDE")
     gw.chassis.clear_estop()
-    time.sleep(0.05)
+    # 清完再等一次：这个 fixture 之后还要被 close，留着未清的急停会让下一条
+    # 用例从一个非预期的状态开始（同一族的耦合 bug 就是这么来的）
+    _wait_until(lambda: not gw.chassis.status().safety_layer_active)
 
 
 # ---------------------------------------------------------------- 端到端

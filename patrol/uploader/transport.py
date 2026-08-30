@@ -40,6 +40,24 @@ class ITransport(ABC):
     def put_file(self, run_id: str, event_id: str, path: Path,
                  sha256: str) -> bool: ...
 
+    def send_alert(self, alert: dict) -> bool:
+        """「发现即报」的快通路。**默认不支持，返回 False。**
+
+        刻意不做成抽象方法：告警是**尽力而为**的旁路，某个 transport 不实现
+        它只该退化成"只有证据包"，不该让这个 transport 整个类都实例化不了。
+
+        两条通路的保证级别是**故意不同**的，这一点要写清楚免得被误用：
+
+        - 告警（本方法）：秒级、轻量、**允许丢**。断网期间发不出去就算了，
+          不落盘不重传。
+        - 证据包（send_manifest + put_file）：**保证不丢**，走 UploadQueue
+          的断点续传，未确认的数据永不自动删除。
+
+        丢一条告警不会丢信息——同一次复核的证据包随后会带着完整数据到达，
+        里面有告警的全部内容且更详细。告警买的是**时延**，不是可靠性。
+        """
+        return False
+
     def close(self) -> None:
         return None
 
@@ -64,6 +82,22 @@ class HttpTransport(ITransport):
                                  "Content-Type": "application/octet-stream"},
                 timeout=self.timeout * 4)
         return r.status_code < 300
+
+    def send_alert(self, alert: dict) -> bool:
+        """超时取 1.5 s 上限，比证据包那条短得多。
+
+        告警发在**感知的主循环里**，而它每 100 ms 要转一圈。断网时 connect
+        会一直等到超时，这段时间 uploader 不再排空 IF-1/IF-3、也不再打包新
+        证据——而断网恰恰是最需要它继续在本地打包的时候。这与 UploadQueue
+        那条"不在主循环里睡"是同一条教训，只是换了个地方犯。
+        """
+        try:
+            r = requests.post("%s/api/alert" % self.base,
+                              json={"site_id": self.site, "alert": alert},
+                              timeout=min(1.5, self.timeout))
+            return r.status_code < 300
+        except requests.RequestException:
+            return False               # 尽力而为：发不出去就算了，证据包随后会到
 
 
 class MqttTransport(ITransport):

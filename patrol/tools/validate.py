@@ -104,7 +104,17 @@ def check_examples(r: Report) -> None:
 # ---------------------------------------------------------------- 3
 def check_pixel_density(r: Report) -> None:
     print(f"\n{YELLOW}[3] 像素密度算例{RESET}")
-    W, D, P_MIN, theta = 1920.0, 0.15, 120.0, 60.0
+    # W / P_MIN / theta 取自配置而不是写死：下面那几个期望值（49.9、149.6、
+    # z_req=2.41、d_max=6.24）是方案书 §5.3 按 1920 px / 60° / 120 px 推出来
+    # 的。改了相机配置还想让这一节绿，就说明推导没跟着重算——camera.yaml 自己
+    # 写着"偏差超过 3° 时 d_max 与路线标定规范必须按实测值重算并通报全组"。
+    # 写死就正好把这个信号屏蔽掉了。
+    from patrol.common.config import Config
+    cfg = Config.load()
+    W = float(cfg.get("camera.width", 1920))
+    theta = float(cfg.get("optics.hfov_at_1x_deg", 60.0))
+    P_MIN = float(cfg.get("optics.pixel_density_min_px", 120.0))
+    D = 0.15                       # 指针表盘直径先验，见 CLASS_SIZE_M
     tan_half = math.tan(math.radians(theta) / 2.0)
 
     def p(z, d):

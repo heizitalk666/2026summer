@@ -4,13 +4,25 @@
 # 到货后要改的就是这几行——上位机代码一行不用动，这正是 ICD §8.7 那个
 # "唯一分支点"设计要换来的东西。
 #
-# 先用假小车联调：
-#   python -m patrol.tools.fakecar --pty      # 打印出 /dev/pts/N
-#   把下面的 chassis.port 换成它，再把 system.yaml 的 driver_mode 改成 real
+# 先用假小车联调（**没有硬件时最有力的一层演示**：走的是真驱动、真协议栈，
+# 只有链路对面换成了电脑上的仿真底盘）：
+#
+#   POSIX：  python -m patrol.tools.fakecar --pty    # 打印 /dev/pts/N
+#            port: /dev/pts/3
+#
+#   Windows：python -m patrol.tools.fakecar --tcp    # 打印 tcp://127.0.0.1:5760
+#            port: tcp://127.0.0.1:5760
+#
+# 再把 system.yaml 的 driver_mode 改成 real。**Windows 上必须走 tcp://**：
+# os.openpty 是 POSIX 专有的，伪终端那条路在 Windows 上根本构造不出来。
+# 端口串以 tcp:// 开头时 drivers/real/serial_link.py:open_link 自动切链路实现，
+# 驱动代码一行不动。
 real:
   serial:
     chassis:
-      port: /dev/ttyUSB0        # 假小车联调时换成 fakecar 打印的 /dev/pts/N
+      # 真串口写 /dev/ttyUSB0（Linux）或 COM3（Windows）；
+      # 假小车联调写 fakecar 打印的那一行（/dev/pts/N 或 tcp://127.0.0.1:5760）
+      port: /dev/ttyUSB0
       baudrate: 115200          # 8N1，无流控
       read_timeout_s: 0.05
       # 上位机 ≥1 Hz 发 PNG；底盘 3 s 收不到就自行减速停车。

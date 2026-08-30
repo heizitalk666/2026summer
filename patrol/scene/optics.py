@@ -69,6 +69,41 @@ def pixel_density(width: int, target_size_m: float, zoom: float,
     )
 
 
+def distance_from_bbox_height(bbox_h_px: float, target_size_m: float, zoom: float,
+                              width: int, hfov_at_1x_deg: float,
+                              *, fallback_m: float = 8.0,
+                              lo_m: float = 0.3, hi_m: float = 30.0) -> float:
+    """由 bbox 高度与先验物理尺寸反算距离，米。针孔关系的逆用：
+
+        h_px = f(z)·D/d，f(z) = f₀·z          →      d = f₀·D·z / h_px
+
+    **只有一个焦距。**方形像素下竖直轴的 f 和水平轴相同：由 vfov 反推
+    H/(2·tan(vfov/2))，代入 tan(vfov/2)=tan(θ₀/2)·H/W 后正好约掉 H，
+    还原成 focal_px(W, θ₀)。所以这里不需要也不该绕 vfov——绕过去只会多一
+    个出错的机会：曾经就在 yolo.py 里按 vfov ≈ θ₀·H/W 线性缩放，1920×1080
+    下 33.75° 对真值 35.98°，视场角差 6.2 %，反算距离差 7.1 %。640×640 下
+    两者恰好相等，所以这个错误在方形输入上测不出来。
+
+    ICD §3.1 明说：精度有限，**只用于像素密度估计**，不能当测距结果用。
+    真机上更靠谱的距离来自巡检位标定表（目标挂在哪个柜子上是标定过的）。
+
+    **zoom 必须由调用方传入，不能取默认值。**复核态 3× 变焦时 bbox 高度涨
+    3 倍，若仍按 1× 反算，距离会算成真值的 1/3，像素密度虚高 3 倍，于是
+    fusion.py 那条"密度不达标就不下读数类结论"的门槛**静默失效**——系统
+    会认为观测条件达标并照常出读数结论。这也正是本函数不放在检测器里的
+    原因：IDetector 刻意不依赖云台状态，拿不到 zoom，只有 node.py 拿得到。
+
+    与 pixel_density() 的自洽性：把本函数的返回值代回 pixel_density，
+    结果恒等于 bbox_h_px，与 zoom 无关。tests/test_distance_estimation.py 用
+    这条恒等式做回归——它同时盯住"zoom 有没有传"和"焦距有没有算对"。
+    """
+    if bbox_h_px <= 1:
+        return float(fallback_m)
+    d = (focal_px(width, hfov_at_1x_deg) * float(target_size_m)
+         * max(1e-6, float(zoom)) / float(bbox_h_px))
+    return float(max(lo_m, min(hi_m, d)))
+
+
 def distance_for_density(width: int, target_size_m: float, zoom: float,
                          want_px: float, hfov_at_1x_deg: float) -> float:
     """反解：要达到 want_px 的像素密度，距离最多多少米。"""

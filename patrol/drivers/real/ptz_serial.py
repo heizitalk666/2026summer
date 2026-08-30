@@ -30,7 +30,7 @@ from patrol.drivers.base import (ExecHandle, ExecProgress, ExecResult,
                                  FocusState, IPTZ, ParamOutOfRange, PTZCaps,
                                  PTZSpeed, PTZStatus)
 from patrol.drivers.real import serial_protocol as P
-from patrol.drivers.real.serial_link import SerialLink
+from patrol.drivers.real.serial_link import SerialLink, open_link
 from patrol.scene.optics import hfov_at_zoom
 
 CMD_SET = "SET"
@@ -44,7 +44,9 @@ _FOCUS = {"F": FocusState.FOCUSING, "L": FocusState.LOCKED, "X": FocusState.FAIL
 class PTZSerial(IPTZ):
     def __init__(self, cfg, link: SerialLink | None = None):
         c = dict(cfg.get("real.serial.ptz", {}))
-        self.link = link or SerialLink(
+        # 走 open_link 而不是直接 SerialLink：端口写成 tcp://host:port
+        # 时自动切到 TCP 环回，用于 Windows 上的假小车联调（PTY 不可用）。
+        self.link = link or open_link(
             port=str(c.get("port", "/dev/ttyUSB1")),
             baudrate=int(c.get("baudrate", 115200)),
             read_timeout_s=float(c.get("read_timeout_s", 0.05)))

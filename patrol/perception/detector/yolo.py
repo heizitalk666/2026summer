@@ -67,33 +67,16 @@ class YoloDetector(IDetector):
                 if cls not in self._classes:
                     continue
                 x1, y1, x2, y2 = [float(v) for v in b.xyxy[0]]
+                # 不带 distance_m。真机上距离要由 bbox 高度与先验尺寸反算，
+                # 而反算必须代入**当前变焦倍率**——检测器拿不到云台状态
+                # （IDetector 刻意不依赖场景/云台，这正是换后端时上层一行
+                # 不改的前提）。所以距离由 node.py 反算，见
+                # scene/optics.py:distance_from_bbox_height。
                 out.append(Detection(
                     defect_class=cls, confidence=float(b.conf[0]),
                     bbox=(x1, y1, x2, y2), source_target_id=None,
-                    extra={"target_size_m": CLASS_SIZE_M.get(cls, 0.15),
-                           # 真机上距离由 bbox 高度与先验尺寸反算，
-                           # 精度有限，只用于像素密度估计（ICD §3.1）
-                           "distance_m": _estimate_distance(
-                               y2 - y1, CLASS_SIZE_M.get(cls, 0.15),
-                               image.shape[0],
-                               float(self.cfg.get("optics.hfov_at_1x_deg", 60.0)),
-                               image.shape[1])}))
+                    extra={"target_size_m": CLASS_SIZE_M.get(cls, 0.15)}))
         return out
 
     def close(self) -> None:
         self._models.clear()
-
-
-def _estimate_distance(bbox_h_px: float, size_m: float, img_h: int,
-                       hfov_1x_deg: float, img_w: int, zoom: float = 1.0) -> float:
-    """由 bbox 高度与先验物理尺寸反算距离。
-
-    ICD §3.1 明说：精度有限，**只用于像素密度估计**，不能当测距结果用。
-    真机上更靠谱的距离来自巡检位标定表（目标挂在哪个柜子上是标定过的）。
-    """
-    import math
-    if bbox_h_px <= 1:
-        return 8.0
-    vfov = hfov_1x_deg * img_h / max(1, img_w)
-    f_px = img_h / (2.0 * math.tan(math.radians(vfov) / 2.0))
-    return float(max(0.3, min(30.0, f_px * size_m * zoom / bbox_h_px)))

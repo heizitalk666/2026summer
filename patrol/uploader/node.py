@@ -32,7 +32,7 @@ from patrol.uploader.transport import UploadQueue
 
 class _Pending:
     __slots__ = ("event_id", "before", "after", "waypoint_id", "meta",
-                 "timeline", "abort", "t0_ns", "defect_class")
+                 "timeline", "abort", "t0_ns", "defect_class", "alerted")
 
     def __init__(self, event_id: str):
         self.event_id = event_id
@@ -40,6 +40,9 @@ class _Pending:
         self.after = None
         self.waypoint_id = None
         self.defect_class = None
+        #: 「发现即报」只发一次。IF-1 是 10 Hz 的，同一个 suspect 会连着出现
+        #: 几十帧；不去重的话云端会被同一件事刷屏，真正的新情况反而被淹掉。
+        self.alerted = False
         self.meta: list[dict] = []
         self.timeline: list[dict] = []
         self.abort = None
@@ -94,6 +97,25 @@ class UploaderNode:
         if p.defect_class and (det is None or det.get("defect_class") != p.defect_class):
             det = next((d for d in dets if d.get("defect_class") == p.defect_class), det)
         if det is None:
+            # **复核帧没检出目标也要收尾，不能就这么丢掉。**
+            #
+            # 这正是方案书 §9.4 点名的失效模式「变焦后目标丢失」：3× 时视场
+            # 只有 21.8°，云台残余抖动或位姿稍有偏差，目标就出框了。原来这里
+            # 直接 return，于是手上那个 pending 一路等到 TTL 超时，最后落成一个
+            # STATE_TIMEOUT——**看起来像状态机卡住了，实际是复核看了但没看见**。
+            # 这两件事的处置完全不同（前者查流水线，后者查观测条件），混成同一
+            # 个结论等于把信息丢了，也违背"宁可暴露，不要静默通过"。
+            #
+            # 实测：中等负载下一轮里 uploader 收到 10 条 stage=VERIFY 报文，
+            # **全部检出为 0、全部被丢弃**，六次完整复核循环无一落成证据包。
+            #
+            # 改成照常收尾：after 留空，decide_verdict 拿到 after_conf=0 会给出
+            # 需要人工复核的结论，证据包里因此看得出"复核到位了、只是没找到"。
+            # 只在确实有巡航基准（before）时才收尾，避免凭空造出证据包。
+            if ev.get("stage") == "VERIFY" and p.before is not None:
+                self.log.warn("复核帧未检出目标，按复核失败收尾（非超时）",
+                              event_id=str(eid)[:8], defect_class=p.defect_class)
+                self._finish(p, l3=ev.get("l3_anomaly"))
             return
         snap = {"confidence": float(det["confidence"]),
                 "pixel_density_px": float(det["pixel_density_px"]),
@@ -103,6 +125,17 @@ class UploaderNode:
                 "l2_reading": det.get("l2_reading")}
         p.defect_class = det.get("defect_class")
         p.waypoint_id = (ev.get("context") or {}).get("waypoint_id") or p.waypoint_id
+
+        # ---- 「发现即报」：suspect 一确认就先甩一条轻量告警给云端 ----
+        # 证据包要等整个复核周期走完（FSM 预算加总 9.2 s，最坏超时 22 s）才
+        # 存在。等它才上报，就成了"发现后 9 秒才报"。这条旁路让云端**秒级**
+        # 知道"这里有情况"，完整证据随后补齐。
+        #
+        # 只带够用的字段，不带图片：告警要小、要快、要能在断网恢复的一瞬间挤
+        # 出去。权威记录始终是证据包，告警丢了不丢信息。
+        if tid is not None and not p.alerted:
+            p.alerted = True
+            self._send_alert(ev, det, p)
         if len(p.meta) < 8000:
             # IF-1 也要进 meta.jsonl。只记 IF-3 的话，"一次线上复核失败可以在桩
             # 环境里逐帧重放"这句就落空了——重放要的正是当时的检出框与读数。
@@ -110,10 +143,55 @@ class UploaderNode:
         if ev.get("stage") == "VERIFY":
             p.after = snap
             self._finish(p, l3=ev.get("l3_anomaly"))
+
         elif p.before is None and ev.get("stage") == "CRUISE":
             # before 必须是**巡航态广角端**的那一帧。ICD §6.4 的三项增益
             # （Δconf、像素密度比、复核成功率）全是拿它做基准算的。
             p.before = snap
+
+    def _send_alert(self, ev: dict, det: dict, p: _Pending) -> None:
+        """把"这里有情况"秒级送到云端。**失败不重试、不落盘。**
+
+        字段按"够人做决定，不够就去翻证据包"来挑：类别、置信度、像素密度、
+        触发判据、航点与位姿。**不带图片**——一张巡航帧 200 KB 上下，断网
+        恢复的那一瞬间先该挤出去的是"哪里有情况"，不是那张图。
+
+        整个方法包在 try 里：这是旁路，它出任何问题都不该影响证据包这条
+        主路。**告警可以丢，证据不能丢**，这个优先级要在代码里看得出来。
+        """
+        try:
+            sus = ev.get("suspect") or {}
+            ctx = ev.get("context") or {}
+            pose = ctx.get("pose") or {}
+            alert = {
+                "run_id": ev.get("run_id"),
+                "event_id": p.event_id,
+                "ts_utc_ms": int(ev.get("ts_utc_ms") or 0),
+                "stage": ev.get("stage"),
+                "defect_class": det.get("defect_class"),
+                "confidence": round(float(det.get("confidence") or 0.0), 4),
+                "pixel_density_px": round(float(det.get("pixel_density_px") or 0.0), 1),
+                "est_distance_m": round(float(det.get("est_distance_m") or 0.0), 3),
+                "trigger_rule": sus.get("trigger_rule"),
+                "severity": sus.get("severity"),
+                "waypoint_id": ctx.get("waypoint_id"),
+                "x_m": pose.get("x_m"),
+                "y_m": pose.get("y_m"),
+            }
+            # 用 getattr 取而不是直接调：transport 是可替换的（测试替身、
+            # 将来的 MQTT/自定义后端都可能没实现这条旁路）。**不支持就跳过**，
+            # 而不是抛——旁路的缺失不该变成主路的异常。
+            send = getattr(self.queue.transport, "send_alert", None)
+            if not callable(send):
+                return
+            ok = bool(send(alert))
+            self.log.info("发现即报", event_id=p.event_id[:8],
+                          defect_class=alert["defect_class"],
+                          trigger_rule=alert["trigger_rule"], delivered=ok)
+        except Exception as e:                              # noqa: BLE001
+            # 旁路的异常绝不能掀翻主路。降级成一条 WARN，证据包照常走。
+            self.log.warn("告警发送异常，已忽略（证据包不受影响）",
+                          event_id=p.event_id[:8], detail=str(e)[:120])
 
     def on_status(self, st: dict) -> None:
         """复核期间的状态流水全部记进 meta.jsonl，供事后逐帧重放。"""

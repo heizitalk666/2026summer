@@ -29,7 +29,7 @@ from patrol.drivers.base import (ChassisCaps, ChassisState, ChassisStatus,
                                  ParamOutOfRange)
 from patrol.common.errors import DriverError, DriverNotReady
 from patrol.drivers.real import serial_protocol as P
-from patrol.drivers.real.serial_link import SerialLink
+from patrol.drivers.real.serial_link import SerialLink, open_link
 
 
 class _Job:
@@ -46,7 +46,9 @@ class ChassisSerial(IChassis):
     def __init__(self, cfg, link: SerialLink | None = None):
         c = dict(cfg.get("real.serial.chassis", {}))
         self.cfg = cfg
-        self.link = link or SerialLink(
+        # 走 open_link 而不是直接 SerialLink：端口写成 tcp://host:port
+        # 时自动切到 TCP 环回，用于 Windows 上的假小车联调（PTY 不可用）。
+        self.link = link or open_link(
             port=str(c.get("port", "/dev/ttyUSB0")),
             baudrate=int(c.get("baudrate", 115200)),
             read_timeout_s=float(c.get("read_timeout_s", 0.05)))

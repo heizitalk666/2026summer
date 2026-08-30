@@ -346,6 +346,164 @@ class SceneRenderer:
             return img, meta, lab
         return img, meta
 
+    # ------------------------------------------------------------ 第三人称
+    def render_thirdperson(self, *, pose_xy_yaw: tuple[float, float, float],
+                           pan_deg: float, tilt_deg: float, zoom: float,
+                           eye_m: tuple[float, float, float] | None = None,
+                           look_at_m: tuple[float, float, float] | None = None,
+                           hfov_deg: float = 75.0,
+                           size: tuple[int, int] | None = None) -> np.ndarray:
+        """从房间里另一个机位看这台车。**纯演示用，不进感知链路。**
+
+        为什么需要它：车载视角能证明"看见了什么"，俯视图能证明"走到哪了"，
+        但两个都回答不了**"车正在看哪儿"**。第三人称把车身、云台朝向、视锥
+        画在同一张图上，"指令下去 → 云台转了 → 视场扫过目标"这条因果链才第一次
+        是**可见的**——这正是没有硬件时最难让人相信的那一环。
+
+        实现上几乎是白捡的：房间、柜列、目标全部走 ``cam.project()`` 的真投影，
+        与机位无关，所以换个 PinholeCamera 就直接成立。这里只额外画两样
+        ``render()`` 永远不会画的东西——**车身**与**视锥**，因为车载视角下
+        相机长在车上，看不见自己。
+
+        刻意不走 render()：那条路上挂着像素密度的立论（渲染出的表盘宽度必须
+        自动满足 p 公式，tests/test_pixel_density.py 盯着），加一个机位参数就
+        多一条能把它弄坏的路径。演示视角不值得冒这个险，所以另开一个方法，
+        共用底层几何但互不影响。
+        """
+        rm = self.world.room
+        L = float(rm.get("length_m", 18.0))
+        Wd = float(rm.get("width_m", 8.0))
+        H = float(rm.get("height_m", 3.2))
+        x, y, yaw = pose_xy_yaw
+        cam_h = self.world.camera_height_m
+
+        # 默认机位：沿**车头朝向**的后上方，略偏一侧。
+        #
+        # 必须按车头朝向退，不能按云台朝向退：云台在复核态是**侧向 90°** 盯着
+        # 柜面的，按它退会把机位放到柜子那一侧，于是视锥朝着相机背后延伸，
+        # 投影出来是几条冲出画幅的长线（近裁剪 + 钳位的产物），画面完全读不懂。
+        #
+        # 侧向偏移取负（偏离柜列一侧）：过道在 y=-3.18，柜面在 y=+1.82，
+        # 往柜子那边偏会挡住视锥要指的地方。
+        if eye_m is None:
+            hx, hy = math.cos(math.radians(yaw)), math.sin(math.radians(yaw))
+            lx, ly = -hy, hx                      # 车体左方
+            eye_m = (float(np.clip(x - 5.2 * hx - 0.9 * lx, -1.5, L - 0.5)),
+                     float(np.clip(y - 5.2 * hy - 0.9 * ly,
+                                   -Wd / 2 + 0.4, Wd / 2 - 0.4)),
+                     min(H - 0.35, cam_h + 1.6))
+        if look_at_m is None:
+            # 看向车与视锥中段之间，两样都留在画面里
+            az0 = math.radians(yaw + pan_deg)
+            look_at_m = (x + 1.6 * math.cos(az0), y + 1.6 * math.sin(az0),
+                         cam_h * 0.9)
+
+        w, h = size or (self.o.width, self.o.height)
+        ex, ey, ez = (float(v) for v in eye_m)
+        dx, dy, dz = (float(a) - float(b) for a, b in zip(look_at_m, eye_m))
+        az = math.degrees(math.atan2(dy, dx))
+        el = math.degrees(math.atan2(dz, max(1e-9, math.hypot(dx, dy))))
+        cam = PinholeCamera(w, h, hfov_deg, (ex, ey, ez), az, 0.0, el)
+
+        img = np.full((h, w, 3), 30, np.uint8)
+        self._draw_room(img, cam)
+
+        # 目标：远到近，画贴图。用与 render() 相同的可见性判定。
+        vis = self.world.visible(cam, margin_px=max(40.0, w * 0.05))
+        vis.sort(key=lambda tv: -self.world.distance_to(tv[0], cam.origin))
+        for t, uv in vis:
+            want = int(max(24.0, abs(uv[:, 0].max() - uv[:, 0].min()) * 1.4))
+            self._warp_texture(img, uv, self._texture(t, want))
+
+        self._draw_robot(img, cam, pose_xy_yaw, pan_deg, tilt_deg, zoom)
+        return img
+
+    def _draw_robot(self, img: np.ndarray, cam: PinholeCamera,
+                    pose_xy_yaw: tuple[float, float, float],
+                    pan_deg: float, tilt_deg: float, zoom: float) -> None:
+        """画车身、云台，以及**当前视锥**。视锥是这张图的重点。
+
+        视锥的张角随变焦收紧——巡航态 60° 宽，复核态 3× 时只有 21.8°。
+        看着那个扇形"啪"地收窄并套住一块表，比任何一句解说都有说服力：
+        这就是"停车 → 对准 → 变焦 → 再看一眼"那条立论链在三维里的样子。
+        """
+        x, y, yaw = pose_xy_yaw
+        cam_h = self.world.camera_height_m
+        c, s = math.cos(math.radians(yaw)), math.sin(math.radians(yaw))
+
+        def body(u: float, v: float, z: float) -> tuple[float, float, float]:
+            """车体系 (前 u, 左 v, 上 z) → map 系。"""
+            return (x + u * c - v * s, y + u * s + v * c, z)
+
+        def poly(pts, color, thickness=2, fill=False):
+            uv = self._project_polygon(cam, list(pts))
+            if uv is None or len(uv) < 2:
+                return
+            p = np.round(uv).astype(np.int32)
+            if fill:
+                cv2.fillConvexPoly(img, p, color, cv2.LINE_AA)
+            else:
+                cv2.polylines(img, [p], True, color, thickness, cv2.LINE_AA)
+
+        # --- 底盘：0.62 × 0.44 × 0.22 m 的箱体
+        hl, hw, bh = 0.31, 0.22, 0.22
+        top = [body(hl, hw, bh), body(hl, -hw, bh), body(-hl, -hw, bh), body(-hl, hw, bh)]
+        bot = [body(hl, hw, 0.02), body(hl, -hw, 0.02), body(-hl, -hw, 0.02), body(-hl, hw, 0.02)]
+        poly(bot, (58, 58, 64), fill=True)
+        poly(top, (96, 100, 108), fill=True)
+        for i in range(4):
+            poly([bot[i], top[i], top[i], bot[i]], (120, 124, 132), 2)
+        poly(top, (150, 156, 166), 2)
+        # 车头朝向标记：一条指向正前方的短线，让"车头在哪"没有歧义
+        poly([body(hl, 0.10, bh + 0.01), body(hl + 0.16, 0.0, bh + 0.01),
+              body(hl, -0.10, bh + 0.01), body(hl, 0.0, bh + 0.01)],
+             (90, 190, 250), fill=True)
+
+        # --- 立柱与云台
+        poly([body(0.02, 0.05, bh), body(0.02, -0.05, bh),
+              body(-0.02, -0.05, cam_h), body(-0.02, 0.05, cam_h)],
+             (110, 114, 122), fill=True)
+        g = 0.09
+        poly([body(g, g, cam_h + g), body(g, -g, cam_h + g),
+              body(-g, -g, cam_h + g), body(-g, g, cam_h + g)],
+             (176, 182, 192), fill=True)
+
+        # --- 视锥。张角随 zoom 收紧，这是整张图要说的话。
+        hf = math.radians(hfov_at_zoom(self.o.hfov_at_1x_deg, max(1.0, float(zoom))))
+        vf = 2.0 * math.atan(math.tan(hf / 2.0) * self.o.height / max(1, self.o.width))
+        az, el = math.radians(yaw + pan_deg), math.radians(tilt_deg)
+        origin = np.array([x, y, cam_h], dtype=float)
+        fwd = np.array([math.cos(el) * math.cos(az), math.cos(el) * math.sin(az),
+                        math.sin(el)])
+        right = np.cross(fwd, np.array([0.0, 0.0, 1.0]))
+        n = np.linalg.norm(right)
+        right = np.array([0.0, -1.0, 0.0]) if n < 1e-9 else right / n
+        up = np.cross(right, fwd)
+
+        # 视锥长度自适应：打到**视锥里最近的那个目标**为止，让扇形正好"落"在
+        # 表盘上。这是这张图要讲的那句话——视场收紧并套住目标。画成固定长度会
+        # 穿过柜面继续延伸，反而看不出"套住"了。
+        reach = 5.0
+        cos_half = math.cos(hf / 2.0)
+        for t in self.world.targets:
+            v = np.asarray(t.position, dtype=float) - origin
+            dist = float(np.linalg.norm(v))
+            if dist < 0.5:
+                continue
+            if float(np.dot(fwd, v / dist)) >= cos_half:
+                reach = min(reach, dist) if reach != 5.0 else dist
+        reach = float(np.clip(reach, 1.5, 8.0))
+
+        th, tv = math.tan(hf / 2.0), math.tan(vf / 2.0)
+        corners = [origin + reach * (fwd + sh * th * right + sv * tv * up)
+                   for sh, sv in ((1, 1), (1, -1), (-1, -1), (-1, 1))]
+        # 变焦越大画得越亮：视锥收紧这件事本身要被看见
+        z_t = min(1.0, (float(zoom) - 1.0) / 2.0)
+        col = (int(90 + 60 * z_t), int(200 - 40 * z_t), int(250 - 30 * z_t))
+        for cpt in corners:
+            poly([tuple(origin), tuple(cpt), tuple(cpt), tuple(origin)], col, 1)
+        poly([tuple(p) for p in corners], col, 2)
+
     # ------------------------------------------------------------ 后处理
     def _specular_strength(self, t: Target, cam: PinholeCamera,
                            cos_face: float) -> float:

@@ -47,9 +47,17 @@ from patrol.perception.node import PerceptionNode
 from patrol.uploader.node import UploaderNode
 
 #: 一轮巡检里 x=4.0（开关把手）、8.0（指示灯）、10.2（压力表）依次进视野，
-#: 车速 0.5 m/s。第一次复核通常在 10 s 内完成，给到 100 s 是留给
+#: 车速 0.5 m/s。第一次复核通常在 10 s 内完成，给到这么大是留给
 #: 对焦失败（5 %）、ACK 丢包（2 %）、安全事件这些桩故意注入的故障重试。
-_DEADLINE_S = 100.0
+#:
+#: **从 100 s 提到 240 s 是因为负载。**四个节点跑在四条线程上，桩的物理仿真
+#: 又由各自的后台线程按墙上时钟推进；机器一忙，整条流水线一起变慢。实测在
+#: 满负载下 100 s 内跑完了六次完整的 SUSPECT→…→PACK 循环，**每一次都对**，
+#: 但每一次都因为下面那个 pending_ttl_s 先到期而被判成 INCONCLUSIVE——
+#: 失败的是配对的时间预算，不是流水线。
+#:
+#: 提大不影响正常运行：拿到一次成功的复核就 break，空闲机器上仍然十几秒返回。
+_DEADLINE_S = 240.0
 
 
 def _load(free_ports, tmp_path) -> Config:
@@ -60,7 +68,13 @@ def _load(free_ports, tmp_path) -> Config:
         "uploader": {
             "evidence_dir": str(tmp_path / "evidence"),
             "upload_period_s": 1e6,     # 本测试不连云端，别让上传队列空转重试
-            "pending_ttl_s": 30.0,
+            # 配对超时。**这是这条用例在负载下唯一的失败点**：原来收紧到 30 s，
+            # 而 FSM 光是超时预算加总就有 22 s，机器一忙就超，于是 uploader
+            # 在 stage=VERIFY 的报文到达前放弃配对，证据包全部变成
+            # INCONCLUSIVE / STATE_TIMEOUT——看起来像流水线坏了，其实是这个数
+            # 太小。取 90 s：比 22 s 的最坏预算留出 4 倍余量，仍远小于 240 s
+            # 的 deadline，配不上仍然会被判失败，不会掩盖真正的配对 bug。
+            "pending_ttl_s": 90.0,
         },
         # 合成误检是设计的一部分（复核就是用来消解它们的），但这条测试要验的是
         # "真表计能被复核到"，掺进误检会让 est_distance_m 判据失去意义

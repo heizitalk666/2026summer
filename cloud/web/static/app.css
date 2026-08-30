@@ -83,14 +83,17 @@ tbody tr:hover{background:var(--surface-2)}
 .live-col h3{font-size:.9rem;margin:0 0 8px;font-weight:600}
 .live-col h3 .muted{font-weight:400}
 .muted{color:var(--ink-3);font-size:.84rem}
-.live-log{max-height:460px}
+.live-log{max-height:300px}
+/* 告警区放在指令流水上面，给它固定高度：它条目少但重要，
+   不该被下面刷得飞快的指令流水挤没 */
+.live-alerts{max-height:150px;margin-bottom:10px}
 .live-models{max-height:180px}
 .maplegend{color:var(--ink-3);font-size:.76rem;margin:6px 0 12px;
   display:flex;gap:14px;flex-wrap:wrap}
 .maplegend i{font-style:normal;color:var(--accent)}
 /* 覆盖全局 table 的 min-width:720px——实时页是两栏布局，每栏只有
    五百多像素，720 的下限会让耗时那一列永远在可视范围之外 */
-.live-log table,.live-models table{font-family:var(--mono);font-size:.78rem;
+.live-log table,.live-models table,.live-alerts table{font-family:var(--mono);font-size:.78rem;
   table-layout:fixed;width:100%;min-width:0}
 /* 固定列宽，否则"指令"那列会把耗时挤出可视范围——而每条指令
    1–2 ms 走完整条校验链，正是演示时要说的数 */
@@ -99,8 +102,8 @@ tbody tr:hover{background:var(--surface-2)}
 #liveTbl th:nth-child(4),#liveTbl td:nth-child(4){width:72px;text-align:right}
 #liveTbl td:nth-child(3){white-space:normal;word-break:break-word}
 #liveDet th:nth-child(1),#liveDet td:nth-child(1){width:38%}
-.live-log tr.bad td{color:var(--crit)}
-.live-log td.t{color:var(--ink-3);white-space:nowrap}
+.live-log tr.bad td,.live-alerts tr.bad td{color:var(--crit)}
+.live-log td.t,.live-alerts td.t{color:var(--ink-3);white-space:nowrap}
 .live-log td.tgt{white-space:nowrap}
 #liveMap{width:100%;height:auto;max-height:300px;background:var(--surface);
   border:1px solid var(--rule)}

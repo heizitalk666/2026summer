@@ -141,11 +141,25 @@ def test_tail_from_start_replays_everything(tmp_path):
 
 
 def test_tail_recovers_when_the_file_is_replaced(tmp_path):
-    """每轮巡检换一个 run_id，日志可能被换掉；控制台不该就此哑掉。"""
+    """每轮巡检换一个 run_id，日志可能被换掉；控制台不该就此哑掉。
+
+    **删除的时机按平台分，这不是将就。**POSIX 的 unlink 只摘目录项，文件被
+    打开着也删得掉，所以那边能原样模拟"日志正被读着就被轮转走"。Windows 上
+    `open()` 默认不带 FILE_SHARE_DELETE，`os.remove` 直接抛 WinError 32——
+    而这恰恰说明**那条路径在 Windows 上根本不存在**：真实的轮转在那边同样
+    删不掉一个打开着的文件，只能先关再删。
+
+    所以两边测的是同一段恢复逻辑（inode 变了要重开、新文件整份都算新的），
+    Windows 上少掉的只是"边读边删"那一瞬间，而那一瞬间在该平台上不可能发生。
+    以前这里无条件 os.remove，于是这条用例在 Windows 上**永远失败**——
+    "一条都不许退化"那条纪律因此在 Windows 机器上从第一天起就是坏的。
+    """
     f = tmp_path / "audit.jsonl"
     f.write_text(json.dumps(rec()) + "\n", encoding="utf-8")
     t = AuditTail(f, from_start=True)
     t.poll()
+    if os.name == "nt":
+        t.close()          # 先松手；poll() 会在下面自己重开
     os.remove(f)
     f.write_text(json.dumps(rec(command="RESUME")) + "\n", encoding="utf-8")
     assert any(r["command"] == "RESUME" for r in t.poll())

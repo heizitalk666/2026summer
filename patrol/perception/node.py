@@ -48,7 +48,8 @@ from patrol.perception.reading.nameplate import (cross_check_dial,
                                                  read_switch_text)
 from patrol.perception.reading.switch import read_switch_position
 from patrol.perception.tracker import IouTracker
-from patrol.scene.optics import pixel_density
+from patrol.scene.optics import (distance_from_bbox_height, pixel_density,
+                                 vfov_from_hfov)
 
 def _sharpness(img) -> float:
     """拉普拉斯方差。连拍 3 帧里挑最清晰的一帧送二级模型。
@@ -406,9 +407,20 @@ class PerceptionNode:
         heavy = (stage == "VERIFY")
         ocr_by_track: dict[int, dict] = {}
         for d in dets:
-            dist = float(d.extra.get("distance_m", 5.0))
             size_m = float(d.extra.get("target_size_m",
                                        CLASS_SIZE_M.get(d.defect_class, 0.15)))
+            # 距离有两个来源，优先级固定：
+            #   1. 检测器直接给 distance_m——**只有合成检测器有**，而且那是
+            #      场景真值（加噪 oracle），不是测出来的。写进 est_distance_m
+            #      时字段名里的 "est" 对合成路径而言名不副实，报告里要标口径。
+            #   2. 由 bbox 高度反算——真机（yolo / 将来的 rknn）走这条。
+            # 反算放在这一层而不是检测器里，是因为它**必须代入当前 zoom**：
+            # 复核态 3× 时 bbox 高 3 倍，按 1× 反算距离会算成真值的 1/3，
+            # 像素密度虚高 3 倍，fusion 那条"密度不达标就不下读数类结论"的
+            # 门槛会静默失效。zoom 是云台状态，只有这一层拿得到。
+            dist = d.extra.get("distance_m")
+            dist = float(dist) if dist is not None else distance_from_bbox_height(
+                d.bbox[3] - d.bbox[1], size_m, zoom, frame.width, self.hfov1x)
             p = pixel_density(frame.width, size_m, zoom, dist, self.hfov1x)
             priors = self._priors_for(d)
             l2 = self._l2_read(frame.image, d, priors) if stage == "VERIFY" or \
@@ -544,7 +556,10 @@ class PerceptionNode:
         用它做初值，之后靠像素偏差闭环收敛。
         """
         hfov = float(ctx["ptz"]["hfov_deg"])
-        vfov = hfov * frame.height / max(1, frame.width)
+        # 视场角**不能**按画幅比例线性缩放。vfov = 2·atan(tan(hfov/2)·H/W)，
+        # 640×640 下两者恰好相等所以测不出来，但实际配置是 1920×1080，
+        # 线性算法给 33.75° 而真值 35.98°，tilt 前馈会短 6.2 %。
+        vfov = vfov_from_hfov(hfov, frame.width, frame.height)
         ex = d.cx - frame.width / 2.0
         ey = d.cy - frame.height / 2.0
         return {"pan_deg": round(-ex * hfov / max(1, frame.width), 4),

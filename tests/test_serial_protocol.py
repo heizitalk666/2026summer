@@ -266,15 +266,26 @@ def test_keepalive_timeout_stops_the_car(tmp_path):
     这是**底盘侧**的独立保护，与网关看门狗是两回事：网关看门狗管"AI 进程
     死了"，保活管"串口断了或整个 RK3576 死了"——后者网关自己也救不了。
     """
-    cfg = Config.load(overrides={"logging": {"dir": str(tmp_path / "logs")},
-                                 "real": {"serial": {"chassis": {"keepalive_s": 0.3}}}})
+    # 停车延迟钉成短的定值。**这一条测的是"保活超时会不会触发停车"，
+    # 不是"停车要多久"**——后者由 test_stop_delay 那一族负责。
+    #
+    # 原来用默认的 [1500, 2500] ms 随机延迟，加上 0.3 s 保活，理想最坏 2.8 s
+    # 对 4.0 s 预算，裕度只有 1.43×。而 FakeCar 没有后台线程，全靠下面这个
+    # 循环调 car.step() 推进；机器一忙循环转得慢，2.8 s 就变成四五秒，于是
+    # 随机失败——实测单独跑 3 次能挂 2 次。把无关的随机量钉死，裕度自然回来。
+    cfg = Config.load(overrides={
+        "logging": {"dir": str(tmp_path / "logs")},
+        "stub": {"chassis": {"stop_delay_ms": [120, 120]}},
+        "real": {"serial": {"chassis": {"keepalive_s": 0.3}}}})
     loop = LoopbackLink()
     me, car = loop.side_a(), FakeCar(cfg, loop.side_b())
     reader = P.LineReader()
     try:
         states = []
         t0 = time.monotonic()
-        while time.monotonic() - t0 < 4.0:
+        # 预算给足：理想只要 0.3+0.12≈0.5 s，看到 STOPPED 就 break，所以
+        # 常态下这个上限根本用不到；它只在机器很忙时兜底，不拖慢正常运行。
+        while time.monotonic() - t0 < 12.0:
             car.step()
             for line in reader.feed(me.read()):
                 try:

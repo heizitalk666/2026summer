@@ -42,12 +42,20 @@ from patrol.scene.world import World
 DEFAULT_FRACTIONS = (0.0, 0.25, 0.50, 0.75, 1.00)
 
 
-def _aim(world: World, target, distance_m: float):
-    """把车摆在正对目标、距离 distance_m 的位置，返回 (车位姿, pan, tilt)。"""
+def _aim(cfg: Config, world: World, target, distance_m: float):
+    """把车摆在正对目标、距离 distance_m 的位置，返回 (车位姿, pan, tilt)。
+
+    画幅与视场角一律从 configs/camera.yaml 取。这里曾经写死 1920/1080/60.0，
+    与配置值恰好一致所以没有症状——但本工具的产出「标定记录」是方案书 §11.1
+    点名的交付物，相机配置改动的那天，标定报告会按旧光学参数出数，错误一路
+    带进验收材料。
+    """
     cx = float(target.position[0])
     cy = float(target.position[1]) - float(distance_m)
     yaw = 90.0
-    cam = PinholeCamera(1920, 1080, hfov_at_zoom(60.0, 1.0),
+    cam = PinholeCamera(int(cfg.get("camera.width", 1920)),
+                        int(cfg.get("camera.height", 1080)),
+                        hfov_at_zoom(float(cfg.get("optics.hfov_at_1x_deg", 60.0)), 1.0),
                         (cx, cy, world.camera_height_m), yaw, 0.0, 0.0)
     pan, tilt = cam.aim_offset_deg(target.position)
     return (cx, cy, yaw), pan, tilt
@@ -70,7 +78,7 @@ def collect(cfg: Config, *, target_id: str, distance_m: float, zoom: float,
     camera.start(int(cfg.get("camera.width")), int(cfg.get("camera.height")), 10)
     # 停车再标定：行进中有运动模糊，标定结果不可重复
     chassis.pause("VERIFY_REQUEST")
-    pose, pan, tilt = _aim(world, target, distance_m)
+    pose, pan, tilt = _aim(cfg, world, target, distance_m)
     # 桩的相机跟着底盘走，这里直接把渲染视点固定在标定位
     camera._viewpoint = lambda: (pose, ptz.true_pose()[0], ptz.true_pose()[1],
                                  ptz.true_pose()[2], 0.0)          # noqa: SLF001
@@ -142,7 +150,7 @@ def pixel_density_calibration(cfg: Config, *, target_id: str = "TGT-01",
     theta_nom = float(cfg.get("optics.hfov_at_1x_deg"))
     rows: list[dict] = []
     for d in (3.0, 4.0, 5.0, 6.0):
-        pose, pan, tilt = _aim(world, target, d)
+        pose, pan, tilt = _aim(cfg, world, target, d)
         camera._viewpoint = lambda p=pose: (p, ptz.true_pose()[0], ptz.true_pose()[1],
                                             ptz.true_pose()[2], 0.0)   # noqa: SLF001
         for z in (1.0, 2.0, 3.0):

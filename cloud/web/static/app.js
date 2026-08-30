@@ -145,15 +145,50 @@ loadRuns().then(loadLedger);
    内存里留最近一段，不落库。所以刷新页面会丢历史——这是有意的：实时页
    要看的是"现在在做什么"，事后要查的东西在台账页。
    ================================================================== */
-const LIVE = { after: 0, timer: null, map: null, rows: [] };
+const LIVE = { after: 0, timer: null, map: null, rows: [], alertAfter: 0, alerts: [] };
+
+/* 「发现即报」。和指令流水分开轮询，因为两者来源不同：指令流水来自
+   console.py 推的 /api/live/push，告警是 uploader 直接打给 /api/alert 的。
+   也就是说**不起 console 也照样有告警**——这一路不依赖那个调试工具。 */
+async function pollAlerts() {
+  let r;
+  try { r = await api(`/api/alerts?after_ms=${LIVE.alertAfter}`); } catch (e) { return; }
+  for (const a of (r.alerts || [])) {
+    LIVE.alertAfter = Math.max(LIVE.alertAfter, a.received_ms || 0);
+    LIVE.alerts.push(a);
+  }
+  if (LIVE.alerts.length > 100) LIVE.alerts = LIVE.alerts.slice(-100);
+  renderAlerts();
+}
+
+function renderAlerts() {
+  const tb = document.querySelector('#liveAlerts tbody');
+  if (!tb) return;
+  if (!LIVE.alerts.length) {
+    tb.innerHTML = '<tr><td colspan="5" class="muted">暂无告警</td></tr>';
+    return;
+  }
+  // 最新的排在最上面：告警要看的是"刚刚发生了什么"，与下面按时间顺读的
+  // 指令流水相反。两张表方向不同是有意的，各自服务不同的读法。
+  const t0 = LIVE.alerts[0].received_ms || 0;
+  tb.innerHTML = LIVE.alerts.slice().reverse().map(a => `
+    <tr class="${a.severity === 'CRITICAL' ? 'bad' : ''}">
+      <td class="t">${(((a.received_ms || 0) - t0) / 1000).toFixed(1)}s</td>
+      <td class="tgt">${a.defect_class || '—'}</td>
+      <td>${a.trigger_rule || '—'}</td>
+      <td class="t">${a.pixel_density_px == null ? '—' : a.pixel_density_px.toFixed(0) + ' px'}</td>
+      <td class="tgt">${a.waypoint_id || '—'}</td>
+    </tr>`).join('');
+}
 
 async function loadLive() {
   if (!LIVE.map) {
     try { LIVE.map = await api('/api/live/map'); } catch (e) { LIVE.map = { waypoints: [], targets: [] }; }
     drawMapBase();
   }
-  if (!LIVE.timer) LIVE.timer = setInterval(pollLive, 500);
+  if (!LIVE.timer) LIVE.timer = setInterval(() => { pollLive(); pollAlerts(); }, 500);
   pollLive();
+  pollAlerts();
 }
 function stopLive() { clearInterval(LIVE.timer); LIVE.timer = null; }
 

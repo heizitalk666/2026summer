@@ -221,9 +221,24 @@ def test_hfov_narrows_with_zoom(rig):
     rig.ptz.set_pose(0.0, 0.0, 3.0, PTZSpeed.NORMAL)
     assert rig.wait(lambda: rig.ptz.status().zoom > 2.95, 4.0)
     import math
-    expect = math.degrees(2 * math.atan(math.tan(math.radians(30.0)) / 3.0))
-    assert expect == pytest.approx(21.79, abs=0.01)          # 钉住这个数本身
-    assert rig.ptz.status().hfov_deg == pytest.approx(expect, abs=0.15)
+
+    # 标称值本身要钉住：3× 时是 21.79°，不是 60/3 = 20°
+    expect_3x = math.degrees(2 * math.atan(math.tan(math.radians(30.0)) / 3.0))
+    assert expect_3x == pytest.approx(21.79, abs=0.01)
+
+    # 但下面这条断言要对着**实测到的那个 zoom** 算，不是对着标称的 3.0。
+    #
+    # 原来是拿 ±0.15° 的容差去比标称值，而放行门槛只要求 zoom > 2.95：
+    # ±0.15° 实际要求 zoom ≥ 2.979，于是 (2.95, 2.979) 这一段是"门槛放行、
+    # 断言必挂"的窗口。伺服还没完全收敛时就会落进去，表现为随机失败——
+    # 而 hfov 与 zoom 成反正切、不成线性，所以这个窗口不是靠调容差能消掉的。
+    #
+    # 按实测 zoom 反算，这条关系在**任何** zoom 上都必须成立，race 就没有了，
+    # 容差反而能收紧到 0.02°。
+    st = rig.ptz.status()          # 只取一次：zoom 与 hfov 必须来自同一个采样，
+                                   # 分两次读的话中间伺服又动了，race 会原样回来
+    expect = math.degrees(2 * math.atan(math.tan(math.radians(30.0)) / st.zoom))
+    assert st.hfov_deg == pytest.approx(expect, abs=0.02)
 
 
 # ---------------------------------------------------------------- poll

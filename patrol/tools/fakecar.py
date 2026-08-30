@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
 """假小车：说 docs/底盘串口协议.md 那一套协议的仿真底盘。
 
-    python -m patrol.tools.fakecar --pty
-    # 打印出一个 /dev/pts/N，把它填进 configs/real.yaml 的
-    # real.serial.chassis.port，再把 driver_mode 改成 real
+    python -m patrol.tools.fakecar --pty     # POSIX：建伪终端 /dev/pts/N
+    python -m patrol.tools.fakecar --tcp     # Windows：TCP 环回 tcp://127.0.0.1:5760
+    # 把打印出来的那一行填进 configs/real.yaml 的 real.serial.chassis.port，
+    # 再把 configs/system.yaml 的 driver_mode 改成 real
+
+**Windows 上必须用 --tcp。**``os.openpty()`` 是 POSIX 专有的，Windows 上不存在，
+--pty 会直接失败；不给参数时会按平台自动选，所以照着敲哪一条都不会踩坑。
+TCP 环回保住了"假小车是独立进程、字节真的过内核"这个关键性质，换掉的只是
+承载（UART → loopback socket）。它不能替代的是物理层：没有波特率、没有线路
+噪声、没有帧错误。
 
 **它存在的理由是把"上位机串口这一侧"从等硬件里解放出来。**硬件没到、底盘
 固件情况不明，但协议是我们定的，于是可以先造一个说同样协议的东西，把
@@ -15,7 +22,8 @@ chassis_serial 的收发、超时、重传、安全事件回调全部调通。�
 链路上。要是这里另写一个"理想底盘"，串口层就只在顺境里被测过，而串口链路
 恰恰是最容易在逆境里出问题的地方。
 
-也可以不建伪终端，直接在进程内对接（`serve_on(link)`），单元测试走这条。
+也可以不建任何端口，直接在进程内用 `serial_link.LoopbackLink` 对接
+（`FakeCar(cfg, loop.side_b())`），单元测试走这条——见 tests/test_serial_protocol.py。
 """
 from __future__ import annotations
 
@@ -227,10 +235,99 @@ class _PtyLink:
                 pass
 
 
+# ---------------------------------------------------------------- TCP 环回
+class _TcpLink:
+    """假小车这一侧的 TCP 环回端点。**Windows 上唯一可用的那条路。**
+
+    ``os.openpty()`` 是 POSIX 专有的，Windows 上 ``hasattr(os, "openpty")``
+    直接是 False，所以 _PtyLink 在 Windows 上连构造都构造不出来。没有硬件的
+    时候，"真驱动 + 假硬件"这一层恰恰是唯一能证明**上位机侧代码是真的**
+    （而不是桩里那条理想链路）的证据，所以它不能因为换个操作系统就没了。
+
+    TCP 环回保住了真正要紧的那个性质：**假小车是独立进程，字节真的穿过内核**。
+    分帧、CRC、超时、重传、2 % ACK 丢包注入全部照原样发生，换掉的只是承载。
+
+    **会反复接受连接。**上位机重启时旧连接断开，这里自动回到 listen 等下一个，
+    否则每演示一轮都得把假小车也重启一次——演示中途重启东西是很难看的。
+    """
+
+    def __init__(self, host: str = "127.0.0.1", port: int = 5760):
+        import socket
+        self._srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._srv.bind((host, int(port)))
+        self._srv.listen(1)
+        # accept 也要超时，否则 step() 会被卡住，20 Hz 状态帧就发不出去了
+        self._srv.settimeout(0.02)
+        h, p = self._srv.getsockname()[:2]
+        self.name = "tcp://%s:%d" % (h, p)
+        self._conn = None
+        self._lock = threading.Lock()
+        self._closed = False
+
+    def _accept_if_idle(self) -> None:
+        if self._closed:
+            return
+        with self._lock:
+            if self._conn is not None:
+                return
+        try:
+            conn, _ = self._srv.accept()
+        except OSError:              # 含超时：这一轮没人连，正常
+            return
+        conn.settimeout(0.01)
+        with self._lock:
+            self._conn = conn
+
+    def _drop(self) -> None:
+        with self._lock:
+            if self._conn is not None:
+                try:
+                    self._conn.close()
+                except OSError:
+                    pass
+                self._conn = None
+
+    def read(self) -> bytes:
+        self._accept_if_idle()
+        with self._lock:
+            c = self._conn
+        if c is None:
+            return b""
+        try:
+            data = c.recv(4096)
+        except OSError:              # 含超时：这一轮没数据
+            return b""
+        if not data:                 # recv 返回空 = 对端已关闭
+            self._drop()
+        return data
+
+    def write(self, data: bytes) -> None:
+        with self._lock:
+            c = self._conn
+        if c is None:
+            return                   # 还没人连上，状态帧直接丢弃，和空串口一样
+        try:
+            c.sendall(data)
+        except OSError:
+            self._drop()
+
+    def close(self) -> None:
+        self._closed = True
+        self._drop()
+        try:
+            self._srv.close()
+        except OSError:
+            pass
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="假小车：说底盘串口协议的仿真底盘")
     ap.add_argument("--config", default=None)
-    ap.add_argument("--pty", action="store_true", help="建伪终端（默认行为）")
+    ap.add_argument("--pty", action="store_true", help="建伪终端（仅 POSIX）")
+    ap.add_argument("--tcp", action="store_true",
+                    help="用 TCP 环回代替伪终端。Windows 只能用这个")
+    ap.add_argument("--port", type=int, default=5760, help="--tcp 的监听端口")
     # 默认用随机种子。固定种子加上大致固定的时序，会让 2 % 的丢包注入每次都
     # 落在同一条指令上——演示时表现为"PAUSE 每次都不生效"，看着像链路坏了，
     # 其实是桩在按设计丢包。要复现某次现象再用 --seed 固定。
@@ -241,12 +338,27 @@ def main() -> int:
 
     cfg = Config.load(a.config)
     seed = a.seed if a.seed is not None else int.from_bytes(os.urandom(4), "little")
-    link = _PtyLink()
+
+    # 选链路。显式指定优先；都没给就按平台自动挑——Windows 没有伪终端，
+    # 自动落到 TCP，免得同学照着 README 敲 --pty 撞一脸 AttributeError。
+    has_pty = hasattr(os, "openpty")
+    if a.pty and not has_pty:
+        print("本平台没有伪终端（os.openpty 不存在，多半是 Windows）。"
+              "请改用：python -m patrol.tools.fakecar --tcp", file=sys.stderr)
+        return 2
+    use_tcp = a.tcp or (not a.pty and not has_pty)
+    link = _TcpLink(port=a.port) if use_tcp else _PtyLink()
+
     car = FakeCar(cfg, link, seed=seed, verbose=a.verbose)
     print("随机种子 %d（--seed %d 可复现本次的故障注入序列）" % (seed, seed))
-    print("假小车已就绪，串口设备：%s" % link.name)
+    print("假小车已就绪，链路：%s%s" % (link.name, "  [TCP 环回]" if use_tcp else "  [伪终端]"))
     print("把它填进 configs/real.yaml 的 real.serial.chassis.port，")
     print("并把 configs/system.yaml 的 driver_mode 改成 real。Ctrl-C 退出。")
+    if use_tcp:
+        print()
+        print("  TCP 环回与真串口的差别（答辩时别说漏）：没有波特率、没有线路")
+        print("  噪声、没有帧错误，且 TCP 保证有序不丢。所以它证明的是**协议栈")
+        print("  与时序逻辑**正确，不证明物理层——物理层要等真串口。")
     try:
         car.serve_forever()
     except KeyboardInterrupt:

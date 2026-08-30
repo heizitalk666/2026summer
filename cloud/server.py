@@ -179,6 +179,49 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     live: dict = {"commands": deque(maxlen=int(cfg.get("cloud.live_ring", 400))),
                   "snapshot": {}, "updated_ms": 0}
 
+    # 「发现即报」的告警环。**故意只放内存、不落库。**
+    #
+    # 告警是边缘在 suspect 一确认时甩过来的快通路（秒级），而证据包要等整个
+    # 复核周期走完（FSM 预算 9.2 s，最坏 22 s）。两者保证级别不同：告警允许
+    # 丢，证据包保证不丢。既然权威记录始终是证据包（它落库、有断点续传、
+    # 未确认永不删除），告警再落一次库只会制造两份可能对不上的真相。
+    #
+    # 它要回答的问题只有一个：**"现在这一刻，现场有没有事？"**
+    alerts: deque = deque(maxlen=int(cfg.get("cloud.alert_ring", 200)))
+
+    @app.post("/api/alert")
+    async def post_alert(req: Request):
+        """边缘的「发现即报」入口。**必须又快又宽容。**
+
+        宽容：字段缺了就缺了，绝不 4xx。边缘那侧这条是尽力而为的旁路，
+        被云端一个 400 顶回来毫无意义——它不会重试，而真正的数据随后会
+        跟着证据包完整到达。这里只做长度与类型的兜底。
+        """
+        try:
+            body = await req.json()
+        except Exception:                       # noqa: BLE001
+            raise HTTPException(status_code=400, detail="body 不是 JSON")
+        a = body.get("alert")
+        if not isinstance(a, dict):
+            raise HTTPException(status_code=400, detail="alert 必须是对象")
+        rec = {k: a.get(k) for k in (
+            "run_id", "event_id", "ts_utc_ms", "stage", "defect_class",
+            "confidence", "pixel_density_px", "est_distance_m",
+            "trigger_rule", "severity", "waypoint_id", "x_m", "y_m")}
+        rec["site_id"] = body.get("site_id")
+        rec["received_ms"] = int(time.time() * 1000)
+        alerts.append(rec)
+        return {"ok": True, "buffered": len(alerts)}
+
+    @app.get("/api/alerts")
+    def get_alerts(after_ms: int = 0, limit: int = 50):
+        """网页轮询。after_ms 按**云端收到的时刻**过滤，不按边缘的时间戳——
+        边缘断网重连时会一次涌进来一批旧时间戳的告警，按边缘时间过滤会让
+        网页直接漏掉它们。"""
+        lim = max(1, min(int(limit), 200))
+        out = [a for a in alerts if int(a.get("received_ms", 0)) > int(after_ms)]
+        return {"alerts": out[-lim:], "total": len(alerts)}
+
     @app.post("/api/live/push")
     async def live_push(req: Request):
         body = await req.json()

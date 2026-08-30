@@ -15,7 +15,7 @@ SWITCH_HANDLE 之后空出来的"纯 L1／未知异常"通路：**非监督方�
 - ``StatisticalAnomaly``  在线学习"正常长什么样"，零训练、零权重，现在就能跑
 - ``EfficientADAnomaly``  接口就位，等权重（见 training/）
 
-选统计法做默认不是凑合：它在线building 正常模型，天然适应现场光照，而且
+选统计法做默认不是凑合：它在线构建正常模型，天然适应现场光照，而且
 可解释——异常分来自哪个特征通道是能说清楚的，答辩时比一个黑盒分数好讲。
 """
 from __future__ import annotations
