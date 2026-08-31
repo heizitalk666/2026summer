@@ -59,10 +59,11 @@ SOURCES = [
            "三类状态量同源，场景/光照/视角一致，不需要做域适配——"
            "这是选它的主要理由", DATA / "distribution_room"),
     Source("paddlex_meter", "PaddleX 工业表计读数数据集",
-           "https://paddlex.bj.bcebos.com/datasets/meter_det.tar.gz",
-           "百度官方公开", "检测 783 张 / 分割 414 张",
+           "https://bj.bcebos.com/paddlex/examples/meter_reader/datasets/meter_seg.tar.gz",
+           "百度官方公开", "分割 374 训练 / 40 验证；检测另见 meter_det.tar.gz",
            "指针与刻度的像素级分割标注，公开数据里只有这一份。"
-           "本项目读数走几何解算不依赖它，主要用来做读数精度的交叉验证",
+           "本项目读数走几何解算不依赖它，主要用来做读数精度的交叉验证。"
+           "直链 wget 即可，不需登录",
            DATA / "paddlex_meter"),
 ]
 
@@ -203,7 +204,11 @@ def _find_pairs(root: Path) -> list[tuple[Path, Path]]:
         ann = None
         for d in _ANN_DIRS:
             for ext in (".png", ".bmp"):
-                for cand in (im.parent.parent / d / (im.stem + ext),
+                # PaddleX 的真实目录是 annotations/<split>/<stem>.png，与
+                # images/<split>/<stem>.jpg 同 split 并列。第一个候选覆盖这种
+                # 带 train/val 子目录的结构；后三个覆盖标注目录扁平摆放的情况。
+                for cand in (root / d / im.parent.name / (im.stem + ext),
+                             im.parent.parent / d / (im.stem + ext),
                              im.parent / d / (im.stem + ext),
                              root / d / (im.stem + ext)):
                     if cand.exists():

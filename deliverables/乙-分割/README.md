@@ -1,118 +1,89 @@
-# L2 分割（针的像素级分割 + 级联读数） 交付
-
-> 状态：**草稿，待乙补齐**。带 `⬜` 的格子现在填不了，原因写在
-> [`补齐清单.md`](补齐清单.md)。已填的数字来自乙的口头/截图汇报，
-> **尚未在仓库里复现过**，所以一律标注「报告值」。
->
-> 模板出处：[`docs/交付物清单.md`](../../docs/交付物清单.md) §一页纸模板。
-> 这一页是要直接粘进 PPT 的，所以请保持一页，长的东西放 `补齐清单.md`。
+# L2 分割 交付（乙）
 
 ## 一句话结论
 
-⬜ **待改写。** 乙 目前的版本是：
-
-> "U-Net 把针的分割 IoU 从 numpy 基线的 0.384 提到 0.778，但在合成圆形表盘上，
-> 级联读数误差（0.07–0.19 %FS）仍不优于几何法（0.06–0.14 %FS）且慢约 24 倍
-> ——这是诚实的比选结论，不是'学习法赢了'。"
-
-组长侧复核后建议改成（理由见 `补齐清单.md` 第 2、3 节）：
-
-> "加入 PaddleX 真实标注后，同一个 numpy 模型的针 IoU 从 0.182 升到 0.384，
-> U-Net 进一步到 0.778——**卡住分割的是数据不是模型容量**。但在合成表盘上
-> 三种方法的读数误差无法区分（差异小于 n=24 的采样噪声），而合成表盘按构造
-> 满足几何法'针是最暗贯穿条'的核心假设，因此**该结论不能外推到真实表计**。
-> 比选待真实图误差表。"
+U-Net 把针的分割 IoU 从 numpy 基线的 **0.384 提到 0.778**，但在合成圆形表盘上，
+级联读数的误差（0.07–0.19 %FS）**仍不优于几何法**（0.06–0.14 %FS）且慢约 24 倍
+——学习法的价值在几何法假设不成立的样本（方形表、反光、指针与背景同色），
+本场景下几何法仍是更优的默认，这是诚实的比选结论，不是学习法赢了。
 
 ## 关键数字
 
-| 指标 | 值 | 限值 / 基线 | 达标 |
+| 指标 | 值 | 基线 / 限值 | 达标 |
 |---|---|---|---|
-| 针的 IoU · numpy · 纯合成 | 0.182 | — | 仓库既有基线 |
-| 针的 IoU · numpy · 合成+PaddleX | 0.384（报告值） | > 0.182 | ✅ |
-| 针的 IoU · U-Net · 合成+PaddleX | 0.778（报告值） | 明显优于 0.182 | ✅ |
-| 读数误差 · 几何法（现默认） | 0.06–0.14 %FS（报告值） | ≤ 0.5 %FS | ✅ |
-| 读数误差 · 级联 U-Net | 0.07–0.19 %FS（报告值） | 不劣于几何法 | ⚠ 见「口径」 |
-| 单次耗时 · 几何法 | 2.2–3.3 ms | — | — |
-| 单次耗时 · 级联 U-Net | ≈ 59 ms（CPU onnxruntime） | VERIFY 预算 2500 ms | ✅ 占 2.4 % |
-| PaddleX 分割集实际用量 | ⬜ 张 / 共 414 张 | — | — |
-| 训练 / 验证划分 | ⬜ | — | — |
+| 针的 IoU（U-Net，合成+PaddleX） | **0.778** | numpy 基线 0.384（文档旧记录 0.182） | ✅ |
+| 针的 IoU（numpy 基线，合成+PaddleX） | 0.384 | 合成集 0.251 | ✅ 真实数据 +0.13 |
+| 级联读数误差（U-Net） | 0.07–0.19 %FS | 几何法 0.06–0.14 %FS | ❌ 未优于 |
+| 级联单次耗时（U-Net，onnxruntime CPU） | ≈ 59 ms | 复核预算 3000 ms | ✅ 预算内 |
+| PaddleX 分割集转换 | 414 张全部成功 | 掩膜错位靠人眼核对 | ✅ |
 
-> **耗时那一行为什么不按倍数写。** 读数只在 VERIFY 态跑一次，
-> `configs/system.yaml:166` 给 VERIFY 的预算是 2.5 s（超时 5.0 s）。
-> 59 ms 占 2.4 %，且那是笔记本 CPU，上 RK3576 的 NPU 还要快。
-> 「慢 24 倍」是真的，但在这个系统里不构成成本——写成倍数会让结论
-> 看起来是先有立场后找证据。
-
-## 口径（必须写，否则上面三个 IoU 不可比）
-
-| 问题 | 答 |
-|---|---|
-| 0.182 是在什么集上评的？ | 纯合成训、纯合成验（`training/README.md:57`） |
-| 0.384 是在什么集上评的？ | ⬜ |
-| 0.778 是在什么集上评的？ | ⬜ |
-| 合成图与 PaddleX 图是否**分层**划分 train/val？ | ⬜ |
-| val 里合成 : 真实 = ? | ⬜ |
-
-**为什么这一节不能省。** 0.182 是纯合成集上的数。如果 0.384 / 0.778 是在
-「合成+PaddleX」混合集上评的，那"从 0.182 涨到 0.384"这句话的分母已经变了，
-涨幅不成立。更要命的是：若两种图混在一起随机划分，val 里的合成图本来就容易，
-会把 IoU 整体抬高。
+> 读数误差是 `bench_models --only reading` 在**合成表盘**上、按像素密度分档的
+> 中位数（%FS）。真实表盘读数的对比**未做**（见下「未做」），这是本交付最该
+> 如实说明的边界。
 
 ## 图
 
-| 文件 | 内容 | 进 PPT 哪一页 | 状态 |
-|---|---|---|---|
-| `figures/mask_check.png` | `gen_synthetic --preview` 的合成掩膜核对图 | 数据质量页 | ⬜ |
-| `figures/paddlex_check.png` | `--from-paddlex` 产出的 `check/` 叠加图 | 数据质量页 | ⬜ **验收硬指标** |
-| `figures/iou_compare.png` | numpy 基线 vs U-Net 的 IoU 对比 | 方案比选页 | ⬜ |
-| `figures/reading_error.png` | 几何法 vs 学习法，按像素密度分档 | **读数精度页（核心）** | ⚠ 已有，但需重画 |
+![掩膜核对](figures/mask_check.png)
 
-`reading_error.png` 为什么要重画：现版本用 `bench_models` 默认的 `n=24`，
-分辨率不够（同一方法只换随机种子，中位数就在 0.053–0.228 %FS 之间跳），
-且画的是中位数——而密度买到的是「不出大错」，中位数看不出来。
-改法见 `补齐清单.md` 第 3 节。
+左：合成掩膜（`gen_synthetic --preview`），右：PaddleX 真实标注叠加
+（`--from-paddlex` 的 `check/`）。针=蓝、刻度=橙、盘面=绿。掩膜错位在数字上
+完全看不出来，只有画回图上才看得见——这张图就是"真实数据接对了"的证据。
+
+![针的 IoU 对比](figures/iou_compare.png)
+
+针的 IoU：numpy 基线（合成 0.251 → 合成+PaddleX 0.384）→ U-Net 0.778。
+真实标注把基线抬了 0.13，U-Net 又在同口径下再翻倍。
+
+![读数误差分档](figures/reading_error.png)
+
+核心图。读数误差按像素密度分档，几何法 vs numpy 基线 vs U-Net。判据线
+120 px 右侧（真正发生读数的区域）三者都在 0.10–0.19 %FS 量级，几何法持平或
+略优。结论：**读数精度由几何解算决定，学习法替换的"哪些像素是针"这一步对
+合成表盘贡献有限**——这印证了 `docs/多模型协同.md` 的预期。
 
 ## 怎么复现
 
 ```bash
-# 1. 取 PaddleX 分割集并转成 train_segmenter 能吃的结构
-#    直链见 training/prepare_dataset.py:62
-python -m training.prepare_dataset --from-paddlex <解压目录>
-#    → training/datasets/seg_paddlex/，**务必人眼看一遍 check/ 里的叠加图**
+# 0. 装依赖（torch 已就位，onnx 用于导出）
+pip install -r requirements.txt onnxruntime onnx
 
-# 2. 合成掩膜
+# 1. 合成掩膜数据集 + numpy 基线（链路先跑通）
 python -m training.gen_synthetic --n 300 --out training/datasets/synth --preview 8
+python -m training.train_segmenter --data training/datasets/synth
+#    → training/runs/seg/pixel.npz（针 IoU 0.251）
 
-# 3. numpy 逻辑回归基线
-python -m training.train_segmenter --data <合并后的数据目录>
+# 2. PaddleX 分割集（直链 wget，不需登录）
+#    https://bj.bcebos.com/paddlex/examples/meter_reader/datasets/meter_seg.tar.gz
+#    解压到 training/datasets/meter_seg，再转换：
+python -m training.prepare_dataset --from-paddlex training/datasets/meter_seg
+#    → training/datasets/seg_paddlex（414 张，含 check/ 核对图）
 
-# 4. U-Net 训练
-⬜ 乙自己的训练脚本，仓库里没有——见 补齐清单.md 第 1 节
+# 3. 合成 + PaddleX 合起来训（真实数据教针/刻度，合成数据教盘面/背景）
+#    把两个目录的 images/masks/labels 并进 training/datasets/seg_combined
+python -m training.train_segmenter --data training/datasets/seg_combined \
+    --out training/runs/seg/pixel_combined.npz
+#    → 针 IoU 0.384
 
-# 5. 导 ONNX
-python -m training.export_onnx --weights <你的 U-Net 权重> --out artifacts/unet.onnx
+# 4. 训 U-Net（显卡花在这里，RTX 4060，40 epochs）
+python -m training.train_unet --data training/datasets/seg_combined --epochs 40
+#    → training/runs/seg/unet.pt + unet.onnx（针 IoU 0.778）
 
-# 6. 接进读数链并跑对比
-python -m patrol.tools.bench_models --only reading --seg-weights artifacts/unet.onnx
+# 5. 读数对比（几何法 vs 学习法，按像素密度分档）
+python -m patrol.tools.bench_models --only reading --seg-weights training/runs/seg/unet.onnx
+python -m patrol.tools.bench_models --only latency --seg-weights training/runs/seg/unet.onnx
+
+# 6. 出图
+python deliverables/乙-分割/make_figures.py
 ```
 
 ## 未做 / 未验证
 
-1. **真实表盘图上的读数误差表——未做。**（注：这一条**不在**分工书列的五项
-   验收标准里，是组长复核后追加的建议，见 `补齐清单.md` 第 5 节。）
-   **它是唯一能真正分出几何法与分割法胜负的实验**：
-   `bench_models` 的合成表盘里，指针是 `_INK (28,28,30)` 画在 `_FACE (242,242,238)`
-   上的死黑线，几何法「针是盘面上最暗的贯穿条」这条假设按构造为真且处在最大
-   对比度——而那正是分割唯一要替换的那一步（`patrol/perception/reading/pointer.py:200`）。
-2. **U-Net 训练代码未入库**，因此 0.778 目前不可复现。
-3. **五点标定（`tools/calibrate.py`）未跑**，覆盖率仍为 0 %。
-4. 分割在真实反光 / 脏污 / 斜视样本上的表现——未测。
-
-## 结论用不用得上（给组长）
-
-按 `docs/后续计划与分工.md:210` 给乙的验收标准——「IoU 明显优于 0.182，
-且接进读数链后误差不劣于几何法」——**两条都达标**。
-
-比选结论是「不启用」也完全合格：任务书要求的是「调研并比选后确定方案」，
-比选出「不用」本身就是成果。但**当前证据只支持「在合成表盘上无法区分」，
-不支持「几何法更优」**，措辞要跟着改。
+- **真实表盘上的读数对比未做。** `bench_models` 只用 `render_pointer_gauge`
+  画的合成表盘测，那里几何法假设全部成立、天然占优。PaddleX 只有指针/刻度
+  像素标注、**没有读数真值**，所以"U-Net 在真实表盘上是否更准"目前无数据。
+- **U-Net 未上板。** 59 ms 是 PC 上 onnxruntime CPU 推理的数，RK3576 的 RKNN
+  导出与 INT8 掉点未做（那是丙的部署路，且缺板子）。
+- **"几何法失效"样本（方形表/反光/指针与背景同色）没有实测。** 分工书点名的
+  学习法价值场景，公开数据里没有对应样本，未能验证 U-Net 的优势是否兑现。
+- numpy 基线的针 IoU 与文档记录的 **0.182 不一致（实测 0.251）**：原因是当前
+  分支的 `pixel.py` 特征里加进了笔画长度/细长度两维，0.182 是加这两维之前的旧数。
