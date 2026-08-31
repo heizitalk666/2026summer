@@ -97,6 +97,25 @@ class UploaderNode:
         if p.defect_class and (det is None or det.get("defect_class") != p.defect_class):
             det = next((d for d in dets if d.get("defect_class") == p.defect_class), det)
         if det is None:
+            # **复核帧没检出目标也要收尾，不能就这么丢掉。**
+            #
+            # 这正是方案书 §9.4 点名的失效模式「变焦后目标丢失」：3× 时视场
+            # 只有 21.8°，云台残余抖动或位姿稍有偏差，目标就出框了。原来这里
+            # 直接 return，于是手上那个 pending 一路等到 TTL 超时，最后落成一个
+            # STATE_TIMEOUT——**看起来像状态机卡住了，实际是复核看了但没看见**。
+            # 这两件事的处置完全不同（前者查流水线，后者查观测条件），混成同一
+            # 个结论等于把信息丢了，也违背"宁可暴露，不要静默通过"。
+            #
+            # 实测：中等负载下一轮里 uploader 收到 10 条 stage=VERIFY 报文，
+            # **全部检出为 0、全部被丢弃**，六次完整复核循环无一落成证据包。
+            #
+            # 改成照常收尾：after 留空，decide_verdict 拿到 after_conf=0 会给出
+            # 需要人工复核的结论，证据包里因此看得出"复核到位了、只是没找到"。
+            # 只在确实有巡航基准（before）时才收尾，避免凭空造出证据包。
+            if ev.get("stage") == "VERIFY" and p.before is not None:
+                self.log.warn("复核帧未检出目标，按复核失败收尾（非超时）",
+                              event_id=str(eid)[:8], defect_class=p.defect_class)
+                self._finish(p, l3=ev.get("l3_anomaly"))
             return
         snap = {"confidence": float(det["confidence"]),
                 "pixel_density_px": float(det["pixel_density_px"]),
