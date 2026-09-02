@@ -209,9 +209,14 @@ def main(argv=None) -> int:
     cfg = Config.load(a.config)
     segmenter = None
     if a.seg_weights:
-        from patrol.perception.segment.pixel import NpzSegmenter
+        w = str(a.seg_weights)
         try:
-            segmenter = NpzSegmenter(cfg, weights=a.seg_weights)
+            if w.endswith(".onnx"):
+                from patrol.perception.segment.onnx_seg import OnnxSegmenter
+                segmenter = OnnxSegmenter(cfg, weights=w)
+            else:
+                from patrol.perception.segment.pixel import NpzSegmenter
+                segmenter = NpzSegmenter(cfg, weights=w)
             print("分割模型：%s" % segmenter.model_info())
         except Exception as e:                                 # noqa: BLE001
             print("分割权重加载失败，只比几何法：%s" % e)
