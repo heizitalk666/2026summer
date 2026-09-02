@@ -1,4 +1,0 @@
-usage: train_detector.py [-h] --stage {cruise,verify} [--data DATA]
-                         [--device DEVICE] [--epochs EPOCHS]
-                         [--project PROJECT]
-train_detector.py: error: unrecognized arguments: --resume

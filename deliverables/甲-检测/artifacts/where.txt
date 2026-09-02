@@ -1,8 +1,12 @@
 # 太大不进版本库的产物放哪
 #
 # 一行一个，格式：<文件名>  <链接或路径>  <大小>  <sha256 前 8 位>
-# 例：
-# unet.onnx   https://pan.example.com/xxxx   47 MB   a1b2c3d4
-#
-# 留空表示还没交。
 
+best_cruise.pt   ⬜ 甲补链接（原先误传进库里，已移出）   19 MB   ⬜
+
+# 说明：best.pt 曾被提交到 deliverables/甲-检测/ 根目录（19 MB）。
+# .gitignore:20 本来就有 *.pt，但 GitHub 网页版「Add files via upload」
+# 不走 .gitignore，所以绕过去了。已从工作树移除——**但它仍在 git 历史里**，
+# 想彻底清掉要重写历史，那是共享分支上的破坏性操作，需要全组同意再做。
+#
+# 以后传大文件走 git 命令行（会被 .gitignore 挡住），别用网页版上传。
