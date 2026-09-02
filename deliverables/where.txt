@@ -1,0 +1,12 @@
+权重文件位置(按清单约定不提交二进制,留路径与再生成方式):
+
+- padim.pt          → training/runs/anomaly/padim.pt (3.1 MB)
+  再生成: python -m training.train_anomaly --data training/datasets/normal_patches \
+          --backend padim --device cpu --out training/runs/anomaly/padim.pt
+- efficientad.pt    → training/runs/anomaly/efficientad.pt (2.8 MB)
+  再生成: python -m training.train_anomaly --data training/datasets/normal_patches \
+          --backend efficientad --device cpu --epochs 50
+- baseline.json     → training/runs/anomaly/baseline.json(1.6 KB,已随仓库提交)
+- padim_net2/net3.onnx → training/runs/anomaly/padim_net{2,3}.onnx
+  再生成: python -m training.export_padim_onnx
+- 预训练主干 resnet18 由 torchvision 自动下载,不随仓库分发
