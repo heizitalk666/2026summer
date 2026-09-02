@@ -27,8 +27,8 @@ function slot(s, x, y, w, h, title, items, when) {
 module.exports = function (pres, IMG) {
   // ============================================================ 10 四类模型
   {
-    const s = pres.addSlide();
-    const y0 = T.head(s, "08", "识别层：为什么不是训一个更大的 YOLO", "「这块表有没有问题」看起来是一个问题，实际是四个，且四者对算力、精度与输出形式的要求互相冲突");
+    const s = T.slide(pres);
+    const y0 = T.head(s, "auto", "识别层：为什么不是训一个更大的 YOLO", "「这块表有没有问题」看起来是一个问题，实际是四个，且四者对算力、精度与输出形式的要求互相冲突");
     const rows = [[T.th("问题"), T.th("要回答的"), T.th("模型类别"), T.th("为什么不能合进一个模型")]];
     [["在哪", "画面里有哪些设备，框在哪", "目标检测 L1", "需要全图扫描且延迟低。巡航期 30 Hz 只能负担这一路"],
      ["多少", "指针指向几、液位到哪", "语义分割 + 几何 L2", "需要像素级精度，只能在放大后的小 ROI 上运行"],
@@ -50,14 +50,14 @@ module.exports = function (pres, IMG) {
       "verdict.result 的六个取值也对应仲裁层的六种结论。我们只是把协议里已经预留的位置填上，没有修改任何 Schema。", {
       x: M + 0.36, y: y0 + 4.04, w: 11.4, h: 1.02, fontFace: F, fontSize: 11.5,
       color: C.mutedOnInk, isTextBox: true, margin: 0, valign: "top", lineSpacing: 16 });
-    T.foot(s, "详见 docs/多模型协同.md（五种协作关系：级联 / 接力 / 互证 / 兜底 / 仲裁）", 10);
+    T.foot(s, "详见 docs/多模型协同.md（五种协作关系：级联 / 接力 / 互证 / 兜底 / 仲裁）");
     s.addNotes("本页是识别部分的总述。评审可能会问为什么不用一个端到端的大模型，答案在最后一段：四个子问题对速度、精度、输出形式和损失函数的要求互相冲突。而且这个划分是 ICD 协议中已经预留的，我们没有改动接口。");
   }
 
   // ============================================================ 11 L4 仲裁
   {
-    const s = pres.addSlide();
-    const y0 = T.head(s, "09", "L4 显式仲裁：四路证据 → 六种结论", "全部为显式规则，每条结论附带 reasons 字段，判定依据可以逐级追溯");
+    const s = T.slide(pres);
+    const y0 = T.head(s, "auto", "L4 显式仲裁：四路证据 → 六种结论", "全部为显式规则，每条结论附带 reasons 字段，判定依据可以逐级追溯");
     const verds = [
       ["CONFIRMED_DEFECT", "确认缺陷", C.red], ["READING_ABNORMAL", "读数越界", C.red],
       ["READING_OK", "读数正常", C.green], ["FALSE_ALARM", "误报消解", C.steel],
@@ -92,14 +92,14 @@ module.exports = function (pres, IMG) {
       s.addText(d, { x: M + 0.84, y: y + 0.46, w: 10.9, h: 0.50, fontFace: F, fontSize: 11,
         color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 15 });
     });
-    T.foot(s, "实现：patrol/perception/fusion.py（278 行，纯规则无学习成分）· 六种结论各有测试用例", 11);
+    T.foot(s, "实现：patrol/perception/fusion.py（278 行，纯规则无学习成分）· 六种结论各有测试用例");
     s.addNotes("仲裁层采用显式规则而非学习模型，是因为它必须能逐条给出判定依据。三条经验中第一条值得展开：举证责任的默认方向属于运维策略问题，不是算法问题。");
   }
 
   // ============================================================ 12 甲 L1 成果
   {
-    const s = pres.addSlide();
-    const y0 = T.head(s, "10", "甲 · L1 目标检测：巡航级模型已训成", "训练集 distribution_room（公开数据集，2 773 张，CC BY 4.0），骨干 yolo11s，训练 120 轮");
+    const s = T.slide(pres);
+    const y0 = T.head(s, "auto", "甲 · L1 目标检测：巡航级模型已训成", "训练集 distribution_room（公开数据集，2 773 张，CC BY 4.0），骨干 yolo11s，训练 120 轮");
     const st = [["0.9949", "mAP50", C.green], ["0.7513", "mAP50-95", C.steel],
                 ["0.9967", "precision", C.steel], ["0.9976", "recall", C.steel]];
     st.forEach(([v, k, col], i) => {
@@ -125,14 +125,14 @@ module.exports = function (pres, IMG) {
     s.addText("第 1 轮 mAP50 已达 0.9759\n需先排除训练集与验证集之间\n存在同源增广副本", {
       x: M + 9.18, y: y0 + 3.94, w: 2.62, h: 0.78, fontFace: F, fontSize: 10,
       bold: true, color: "8A5A05", isTextBox: true, margin: 0, valign: "middle", lineSpacing: 14 });
-    T.foot(s, "产物：deliverables/甲-检测/（stage_meta / args / results.csv / 7 张曲线图）", 12);
+    T.foot(s, "产物：deliverables/甲-检测/（stage_meta / args / results.csv / 7 张曲线图）");
     s.addNotes("甲的巡航级模型已训练完成，指标较高。有一点要主动说明：第 1 轮 mAP50 就达到 0.976，这个数偏高。我们已经实现了 --check-leak 命令，用于排查 Roboflow 导出的增广副本跨训练集与验证集分布的情况，明天出结果。主动说明比被问到再解释更好。");
   }
 
   // ============================================================ 13 甲 L1 待补（槽位）
   {
-    const s = pres.addSlide();
-    const y0 = T.head(s, "11", "甲 · L1 检测：待补齐部分", "复核级模型与链路切换对比，明天上午补入");
+    const s = T.slide(pres);
+    const y0 = T.head(s, "auto", "甲 · L1 检测：待补齐部分", "复核级模型与链路切换对比，明天上午补入");
     slot(s, M, y0, 6.0, 3.92, "训练与指标（明早补）", [
       "复核级 yolo11m 训练与 mAP50（验收：优于巡航级）",
       "单帧推理耗时（限值 ≤ 33 ms，巡航期 30 Hz 的硬指标）",
@@ -154,14 +154,14 @@ module.exports = function (pres, IMG) {
       "上层代码不做任何修改，只改一项配置就能把训练好的权重接入全链路。", {
       x: M + 0.36, y: y0 + 4.14, w: 11.4, h: 1.06, fontFace: F, fontSize: 12,
       color: C.mutedOnInk, isTextBox: true, margin: 0, valign: "middle", lineSpacing: 17 });
-    T.foot(s, "本页为占位，明天上午补齐后重新生成", 13);
+    T.foot(s, "本页为占位，明天上午补齐后重新生成");
     s.addNotes("本页明天上午替换。如果答辩前甲仍未补齐，就按现在的内容讲，说明哪些项目尚未测试即可，不要临时填一个数字。");
   }
 
   // ============================================================ 14 乙 L2 IoU
   {
-    const s = pres.addSlide();
-    const y0 = T.head(s, "12", "乙 · L2 语义分割：接上真实数据后 IoU 三级跃升", "指针类别的分割 IoU。公开数据集中只有 PaddleX 这一份提供了像素级指针标注");
+    const s = T.slide(pres);
+    const y0 = T.head(s, "auto", "乙 · L2 语义分割：接上真实数据后 IoU 三级跃升", "指针类别的分割 IoU。公开数据集中只有 PaddleX 这一份提供了像素级指针标注");
     s.addImage({ path: IMG + "/l2_iou.png", x: M, y: y0, w: 6.10, h: 3.78 });
 
     const steps = [["0.251", "纯合成掩膜训练", "链路先跑通的基线", C.muted],
@@ -185,14 +185,14 @@ module.exports = function (pres, IMG) {
     s.addText("模型与评测口径都不变，仅把 PaddleX 的真实像素标注加入训练集，指针 IoU 就从 0.251 升到 0.384，提高 53 %。这说明真实标注是当前的瓶颈，也验证了指针与刻度的区分正是合成掩膜最难提供监督信号的一环。", {
       x: M + 0.34, y: y0 + 4.44, w: 11.4, h: 0.66, fontFace: F, fontSize: 11,
       color: "1C6B47", isTextBox: true, margin: 0, valign: "top", lineSpacing: 15 });
-    T.foot(s, "乙 顺带修了两个只有真跑过才会暴露的 bug：PaddleX 直链 404（且原指向检测集）、标注目录结构不匹配", 14);
+    T.foot(s, "乙 顺带修了两个只有真跑过才会暴露的 bug：PaddleX 直链 404（且原指向检测集）、标注目录结构不匹配");
     s.addNotes("乙这一路值得讲的不是 0.778，而是 0.251 到 0.384 这一步：模型不变，仅增加真实标注就提高 53 %，说明瓶颈在数据而不在模型容量。他修的两个缺陷也值得提一句，那是只有真正下载数据并完整跑通流程才会暴露的问题。");
   }
 
   // ============================================================ 15 乙 L2 数据接通证据
   {
-    const s = pres.addSlide();
-    const y0 = T.head(s, "13", "乙 · L2：真实数据是否接入正确，只能通过人工检查叠加图确认", "掩膜错位不会反映在指标上。IoU 仍然正常，但模型学到的是错误的类别对应关系");
+    const s = T.slide(pres);
+    const y0 = T.head(s, "auto", "乙 · L2：真实数据是否接入正确，只能通过人工检查叠加图确认", "掩膜错位不会反映在指标上。IoU 仍然正常，但模型学到的是错误的类别对应关系");
     s.addImage({ path: IMG + "/l2_mask.png", x: M + 0.55, y: y0, w: 11.0, h: 3.52 });
 
     T.card(s, M, y0 + 3.66, 5.9, 1.52);
@@ -209,14 +209,14 @@ module.exports = function (pres, IMG) {
       "盘面与背景的区分：由合成掩膜提供监督（合成数据在这一维上标注明确）", {
       x: M + 6.40, y: y0 + 4.14, w: 5.44, h: 0.96, fontFace: F, fontSize: 10.5,
       color: "1C6B47", isTextBox: true, margin: 0, valign: "top", lineSpacing: 15 });
-    T.foot(s, "验收标准原文：人眼查看 check/ 目录下的叠加图，确认掩膜没有错位。类别映射错一位，后续所有 IoU 都是错的，且不会报错", 15);
+    T.foot(s, "验收标准原文：人眼查看 check/ 目录下的叠加图，确认掩膜没有错位。类别映射错一位，后续所有 IoU 都是错的，且不会报错");
     s.addNotes("本页讲的是核对方法：有些错误不会反映在指标上，只能人工检查。类别映射错一位，IoU 仍然可以训得很高，但模型学到的对应关系是错的。因此我们把人工检查叠加图写成了硬性验收标准。");
   }
 
   // ============================================================ 16 乙 L2 比选（槽位）
   {
-    const s = pres.addSlide();
-    const y0 = T.head(s, "14", "乙 · L2：几何法 vs 学习法的比选结论", "核心图正在重画，现有版本的采样量不足以支撑结论");
+    const s = T.slide(pres);
+    const y0 = T.head(s, "auto", "乙 · L2：几何法 vs 学习法的比选结论", "核心图正在重画，现有版本的采样量不足以支撑结论");
     T.card(s, M, y0, 5.9, 1.86);
     T.cardTitle(s, M + 0.26, y0 + 0.14, 5.4, "已确定的部分", C.green);
     s.addText([
@@ -252,14 +252,14 @@ module.exports = function (pres, IMG) {
         x: M + 0.88, y, w: 10.9, h: 0.76, fontFace: F, fontSize: 10.5,
         isTextBox: true, margin: 0, valign: "top", lineSpacing: 14 });
     });
-    T.foot(s, "结论措辞取「在合成表盘上三者不可区分」，而非「几何法更优」。最终比选需要真实表盘的误差表", 16);
+    T.foot(s, "结论措辞取「在合成表盘上三者不可区分」，而非「几何法更优」。最终比选需要真实表盘的误差表");
     s.addNotes("本页讲的是自查过程。我们没有直接采用第一版图，而是先估计了采样噪声，结果发现待比较的差异小于噪声。如果评审问怎么确认这个差异是真实的，这一页就是回答。");
   }
 
   // ============================================================ 17 丙 L3 比选表
   {
-    const s = pres.addSlide();
-    const y0 = T.head(s, "15", "丙 · L3 未知异常检测：四方案横向比选", "非监督方法，训练只使用正常样本，避开缺陷标注数据不可得的约束");
+    const s = T.slide(pres);
+    const y0 = T.head(s, "auto", "丙 · L3 未知异常检测：四方案横向比选", "非监督方法，训练只使用正常样本，避开缺陷标注数据不可得的约束");
     const rows = [[T.th("指标"), T.th("统计法\n基线·零权重"), T.th("EfficientAD\n简化蒸馏"),
                    T.th("PaDiM\n对角"), T.th("PaDiM 全协方差\n（采用）")]];
     const data = [
@@ -294,14 +294,14 @@ module.exports = function (pres, IMG) {
       "部署目标是 RK3576 的 NPU，26 ms 在复核态预算内，因此这个取舍成立。", {
       x: M + 6.40, y: y0 + 4.06, w: 5.44, h: 0.96, fontFace: F, fontSize: 10.5,
       color: "1C6B47", isTextBox: true, margin: 0, valign: "top", lineSpacing: 15 });
-    T.foot(s, "EfficientAD 简化蒸馏实测出现分数倒挂，异常样本得分反而更低，未采用。原因与数据一并记录在案", 17);
+    T.foot(s, "EfficientAD 简化蒸馏实测出现分数倒挂，异常样本得分反而更低，未采用。原因与数据一并记录在案");
     s.addNotes("丙这一路完成度最高。四个方案在同一批样本、同一阈值下比较，结论明确。要强调 EfficientAD 这一列：该方案失败了，我们照实写进表里而不是删除，这是完整的比选记录。");
   }
 
   // ============================================================ 18 丙 L3 图
   {
-    const s = pres.addSlide();
-    const y0 = T.head(s, "16", "丙 · L3：分数分布与 ROC", "正常与异常两组分数是否分离，可以直接从分布图判断");
+    const s = T.slide(pres);
+    const y0 = T.head(s, "auto", "丙 · L3：分数分布与 ROC", "正常与异常两组分数是否分离，可以直接从分布图判断");
     s.addImage({ path: IMG + "/l3_score_dist.png", x: M, y: y0, w: 5.95, h: 3.82 });
     s.addImage({ path: IMG + "/l3_roc.png", x: M + 6.14, y: y0, w: 5.95, h: 3.82 });
     s.addText("四种方法的正常 / 异常分数分布（竖线 = 阈值 0.55）。全协方差 PaDiM 两簇几乎完全分开；" +
@@ -312,14 +312,14 @@ module.exports = function (pres, IMG) {
       "说明该结果不依赖于某一个特定阈值。", {
       x: M + 6.14, y: y0 + 3.94, w: 5.95, h: 0.86, fontFace: F, fontSize: 10.5,
       color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 15 });
-    T.foot(s, "产物：deliverables/丙-异常/（l3_report.json / baseline.json / onnx_smoke.json / rknn_export.md）", 18);
+    T.foot(s, "产物：deliverables/丙-异常/（l3_report.json / baseline.json / onnx_smoke.json / rknn_export.md）");
     s.addNotes("左图最直观：两组分布分离即为可用，重叠即为不可用，不需要了解算法细节也能判断。右图 ROC 说明结论不依赖阈值的选取。");
   }
 
   // ============================================================ 19 丙 两个发现
   {
-    const s = pres.addSlide();
-    const y0 = T.head(s, "17", "丙 · L3：两个决定结果的实测发现", "这两条解释了第一版为什么失败，比最终指标更有参考价值");
+    const s = T.slide(pres);
+    const y0 = T.head(s, "auto", "丙 · L3：两个决定结果的实测发现", "这两条解释了第一版为什么失败，比最终指标更有参考价值");
     const f = [
       ["训练裁片必须模拟运行时的检测框噪声", C.red,
        "系统送入 L3 的是检测框，而检测框存在抖动，会把表盘边缘裁掉。实测裁掉 12 % 的正常表盘，异常分由 0.5 升到 1.0，全部误报。",
@@ -352,14 +352,14 @@ module.exports = function (pres, IMG) {
         x: M + 0.92, y: y + 1.60, w: 10.7, h: 0.62, fontFace: F, fontSize: 10.5,
         isTextBox: true, margin: 0, valign: "top", lineSpacing: 14 });
     });
-    T.foot(s, "两条都已写入交付文档。第一版为什么失败，比最终版指标多高更能说明流程是真正跑通的", 19);
+    T.foot(s, "两条都已写入交付文档。第一版为什么失败，比最终版指标多高更能说明流程是真正跑通的");
     s.addNotes("第一条值得展开：离线数据集的分布与运行时管道实际送入的数据分布不一致，导致离线指标正常而接入系统后全部误报。这类问题只有把模型真正接进系统运行才会暴露，只在数据集上训练和评测是发现不了的。");
   }
 
   // ============================================================ 20 三路小结
   {
-    const s = pres.addSlide();
-    const y0 = T.head(s, "18", "三条识别路线：阶段性小结", "每条路线都给出了实测数据，也写明了尚未测试的部分");
+    const s = T.slide(pres);
+    const y0 = T.head(s, "auto", "三条识别路线：阶段性小结", "每条路线都给出了实测数据，也写明了尚未测试的部分");
     const rows = [[T.th("路线"), T.th("负责"), T.th("已完成 · 实测数"), T.th("比选结论"), T.th("待补")]];
     [["L1 目标检测", "甲", "巡航级 yolo11s：mAP50 0.9949 / mAP50-95 0.7513", "使用公开数据集训练，合成数据仅用于增广", "复核级、耗时、切换对比"],
      ["L2 语义分割", "乙", "针 IoU 0.251 → 0.384 → 0.778；耗时 59 ms 在预算内", "在合成表盘上与几何法不可区分，仍以几何法为默认实现", "核心图重画、真实图误差表"],
@@ -375,7 +375,7 @@ module.exports = function (pres, IMG) {
     s.addText("L1 依靠公开数据集获得纹理多样性，L2 依靠真实标注学习指针与刻度的区分，L3 依靠合成正常样本避开缺陷数据不可得的约束。三条路线所需的数据类型完全不同，这是四类模型分开训练而不是合并为单一模型的实证依据。", {
       x: M + 0.34, y: y0 + 4.24, w: 11.4, h: 0.88, fontFace: F, fontSize: 11.5,
       color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 16 });
-    T.foot(s, "三份完整交付见 deliverables/ 下各自目录（一页纸 + 图 + 产物 + 复现命令）", 20);
+    T.foot(s, "三份完整交付见 deliverables/ 下各自目录（一页纸 + 图 + 产物 + 复现命令）");
     s.addNotes("本页收束识别部分。最后一段是结论：三条路线所需的数据类型完全不同，这是分开做的实证依据。");
   }
 };

@@ -5,7 +5,7 @@ const { C, F, W, H, M } = T;
 module.exports = function (pres, IMG) {
   // ============================================================ 1 封面
   {
-    const s = pres.addSlide();
+    const s = T.slide(pres);
     T.darkBg(s);
     // 母题：右侧一组同心圆环（表盘）
     s.addShape("ellipse", { x: 9.05, y: 1.15, w: 3.95, h: 3.95,
@@ -46,34 +46,35 @@ module.exports = function (pres, IMG) {
 
   // ============================================================ 2 目录
   {
-    const s = pres.addSlide();
-    const y0 = T.head(s, "目", "汇报提纲", "四个部分，重点在第二、三部分的实测数据");
+    const s = T.slide(pres);
+    const y0 = T.head(s, "目", "汇报提纲", "五个部分。第二部分讲架构，第四部分是三条识别路线的实测数据");
     const secs = [
-      ["01", "课题与技术路线", "为什么必须停车变焦重拍，以及像素密度与读数精度的关系", "3 – 7"],
-      ["02", "工作量与质量保障", "代码规模、接口冻结机制，以及 501 项测试的覆盖范围", "8 – 11"],
-      ["03", "三条识别路线的实测成果", "L1 检测 / L2 分割 / L3 异常，各自的比选结论与数据", "12 – 20"],
-      ["04", "系统能力与收口", "安全边界、云台控制、端到端闭环、风险与下一步", "21 – 27"],
+      ["01", "课题与核心立论", "三项要求为何互相冲突，像素密度与读数精度的关系，主动复核的流程", "3 – 5"],
+      ["02", "系统架构与实现", "四进程四接口、一次复核的十二步数据流、接口冻结机制、代码分层", "6 – 11"],
+      ["03", "工作量、质量与完成度", "代码与测试规模、三项检查、逐项列出的完成度总表", "12 – 14"],
+      ["04", "三条识别路线的实测成果", "L1 检测、L2 分割、L3 异常各自的数据与比选结论", "15 – 28"],
+      ["05", "系统能力与收口", "安全边界、云台控制、端到端闭环、风险与下一步", "29 – 35"],
     ];
     secs.forEach(([n, t, d, p], i) => {
-      const y = y0 + 0.06 + i * 1.31;
-      T.card(s, M, y, W - M * 2, 1.14);
-      s.addText(n, { x: M + 0.3, y, w: 0.9, h: 1.14, fontFace: F, fontSize: 30, bold: true,
+      const y = y0 + 0.04 + i * 1.11;
+      T.card(s, M, y, W - M * 2, 0.96);
+      s.addText(n, { x: M + 0.3, y, w: 0.9, h: 0.96, fontFace: F, fontSize: 26, bold: true,
         color: C.amber, isTextBox: true, margin: 0, valign: "middle" });
-      s.addText(t, { x: M + 1.24, y: y + 0.20, w: 8.6, h: 0.38, fontFace: F, fontSize: 17,
+      s.addText(t, { x: M + 1.24, y: y + 0.12, w: 8.6, h: 0.36, fontFace: F, fontSize: 16,
         bold: true, color: C.text, isTextBox: true, margin: 0, valign: "middle" });
-      s.addText(d, { x: M + 1.24, y: y + 0.60, w: 8.9, h: 0.34, fontFace: F, fontSize: 11.5,
+      s.addText(d, { x: M + 1.24, y: y + 0.50, w: 9.4, h: 0.34, fontFace: F, fontSize: 11,
         color: C.muted, isTextBox: true, margin: 0, valign: "middle" });
-      s.addText("P " + p, { x: W - M - 1.5, y, w: 1.2, h: 1.14, align: "right",
+      s.addText("P " + p, { x: W - M - 1.5, y, w: 1.2, h: 0.96, align: "right",
         fontFace: F, fontSize: 12, color: C.steel, isTextBox: true, margin: 0, valign: "middle" });
     });
-    T.foot(s, null, 2);
+    T.foot(s, null);
     s.addNotes("提纲四部分。时间紧的话，重点讲 01 的像素密度立论和 03 的三条实测结论。");
   }
 
   // ============================================================ 3 课题与难点
   {
-    const s = pres.addSlide();
-    const y0 = T.head(s, "01", "课题：配电室要什么样的巡检", "任务书三项要求，每一项都指向同一个矛盾");
+    const s = T.slide(pres);
+    const y0 = T.head(s, "auto", "课题：配电室要什么样的巡检", "任务书三项要求，每一项都指向同一个矛盾");
     const items = [
       ["看得清", "表计读数误差 ≤ 0.5 % FS", "5 m 处 1× 变焦时表盘成像只有 50 px，指针无法分辨", C.red],
       ["跑得完", "单次巡检 ≤ 30 min", "靠近、放大、多次拍摄都会增加单个航点的停留时间", C.amber],
@@ -104,14 +105,14 @@ module.exports = function (pres, IMG) {
       "模型只提供候选，不直接控制执行器。", {
       x: M + 0.42, y: y0 + 3.90, w: 11.2, h: 1.10, fontFace: F, fontSize: 12.5,
       color: C.mutedOnInk, isTextBox: true, margin: 0, valign: "top", lineSpacing: 19 });
-    T.foot(s, "指标出处：设计方案书 §2.2 表 2-2 / 测控系统综合实训课题任务书", 3);
+    T.foot(s, "指标出处：设计方案书 §2.2 表 2-2 / 测控系统综合实训课题任务书");
     s.addNotes("本页要讲清三项要求之间的冲突。如果评审问为什么不直接换更大的模型，答案是：50 像素的成像里本来就没有足够信息，信息在光学环节已经丢失，只能通过变焦重新采集。");
   }
 
   // ============================================================ 4 核心立论：像素密度
   {
-    const s = pres.addSlide();
-    const y0 = T.head(s, "02", "核心立论：像素密度决定读数精度", "同一块压力表在巡航态与复核态下的成像对比");
+    const s = T.slide(pres);
+    const y0 = T.head(s, "auto", "核心立论：像素密度决定读数精度", "同一块压力表在巡航态与复核态下的成像对比");
     s.addImage({ path: IMG + "/zoom_compare.png", x: M, y: y0, w: 12.09, h: 3.92 });
 
     const st = [["50.0 px", "巡航态 1× 实测框宽", C.red],
@@ -123,14 +124,14 @@ module.exports = function (pres, IMG) {
     s.addText("公式算出 49.8 / 149.5 px\n渲染器与光学模型自洽", {
       x: M + 9.55, y: y0 + 4.16, w: 2.4, h: 0.92, fontFace: F, fontSize: 11.5, bold: true,
       color: "8A5A05", isTextBox: true, margin: 0, valign: "middle", lineSpacing: 17 });
-    T.foot(s, "复现：python -m patrol.tools.viewer --demo-zoom --out out/   ·   光学公式集中在 patrol/scene/optics.py", 4);
+    T.foot(s, "复现：python -m patrol.tools.viewer --demo-zoom --out out/   ·   光学公式集中在 patrol/scene/optics.py");
     s.addNotes("左侧巡航态 50 像素，指针无法分辨；右侧 3 倍变焦后 150 像素，刻度可读。要强调的是实测框宽与针孔投影公式的计算值相差 0.4 %，说明虚拟场景在光学上与公式自洽，因此在其上测得的精度指标可以作为依据。");
   }
 
   // ============================================================ 5 主动式复核流程
   {
-    const s = pres.addSlide();
-    const y0 = T.head(s, "03", "主动式复核：一次完整的决策闭环", "十状态机。每个状态都定义了超时转移，不存在没有出边的状态");
+    const s = T.slide(pres);
+    const y0 = T.head(s, "auto", "主动式复核：一次完整的决策闭环", "十状态机。每个状态都定义了超时转移，不存在没有出边的状态");
     const steps = [
       ["CRUISE", "30 Hz 巡航\nL1 小模型扫描", C.steel],
       ["SUSPECT", "连续三帧同一目标\n才确认，防抖动", C.steel],
@@ -172,14 +173,14 @@ module.exports = function (pres, IMG) {
       s.addText(d, { x: x + 0.26, y: y0 + 3.64, w: 3.42, h: 1.10, fontFace: F, fontSize: 11,
         color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 15 });
     });
-    T.foot(s, "实现：patrol/mission/fsm.py（598 行，十状态）· suppress.py（三条抑制）· budget.py（预算与顺延队列）", 5);
+    T.foot(s, "实现：patrol/mission/fsm.py（598 行，十状态）· suppress.py（三条抑制）· budget.py（预算与顺延队列）");
     s.addNotes("十个状态中这里画出八个主线状态，另外两个是 ABORT 和 ERROR。设计上有一条约束：每个状态都必须定义超时转移，因此状态机不会停在某个状态上不动。复核预算公式的作用是限制单轮巡检中复核的总次数，使主动复核不会超出 30 min 的巡检时间预算。");
   }
 
   // ============================================================ 6 架构
   {
-    const s = pres.addSlide();
-    const y0 = T.head(s, "04", "系统架构：四进程 + 四接口 + 五份冻结 Schema", "进程边界按安全职责划分：安全网关必须在感知与任务进程异常退出后继续工作");
+    const s = T.slide(pres);
+    const y0 = T.head(s, "auto", "系统架构：四进程 + 四接口 + 五份冻结 Schema", "进程边界按安全职责划分：安全网关必须在感知与任务进程异常退出后继续工作");
     const procs = [
       ["perception  感知", "相机、四路模型", "驱动以 passive 建，收不到指令", C.steel],
       ["mission  任务", "十状态机、PID、预算", "不碰驱动，不碰模型", C.steel],
@@ -217,14 +218,14 @@ module.exports = function (pres, IMG) {
       "「终止感知与任务进程后，车辆仍按路线走完」这条演示验证的就是这个边界。", {
       x: M + 8.10, y: y0 + 3.10, w: 3.78, h: 1.86, fontFace: F, fontSize: 11,
       color: C.mutedOnInk, isTextBox: true, margin: 0, valign: "top", lineSpacing: 16 });
-    T.foot(s, "五份 JSON Schema 全部 additionalProperties: false；改接口要走 validate.py 的 ALLOWED_DRIFT 白名单流程", 6);
+    T.foot(s, "五份 JSON Schema 全部 additionalProperties: false；改接口要走 validate.py 的 ALLOWED_DRIFT 白名单流程");
     s.addNotes("本页回答架构复杂度的问题。四个进程的边界按安全职责划分，不按代码量划分。五份 Schema 是冻结的接口契约，修改任何一个字段都要走 ALLOWED_DRIFT 白名单流程，因此四个人可以并行修改各自的模块而不产生接口冲突。");
   }
 
   // ============================================================ 7 无硬件并行开发
   {
-    const s = pres.addSlide();
-    const y0 = T.head(s, "05", "硬件没到，怎么把「控」这一半做出来", "虚拟配电室按针孔投影渲染，因此精度与控制指标是实测值而非推导值");
+    const s = T.slide(pres);
+    const y0 = T.head(s, "auto", "硬件没到，怎么把「控」这一半做出来", "虚拟配电室按针孔投影渲染，因此精度与控制指标是实测值而非推导值");
     s.addImage({ path: IMG + "/thirdperson_compare.png", x: M, y: y0, w: 7.55, h: 2.48 });
     s.addText("第三人称机位同时画出车身、云台朝向与当前视锥。变焦 1× 到 3× 时视场角由 60.0° 收窄到 21.8°，" +
       "视锥落在被复核的表盘上。指令下发、云台转动、视场覆盖目标这一串过程因此可以直接观察，不必只看日志。", {
@@ -252,95 +253,8 @@ module.exports = function (pres, IMG) {
       "分帧、CRC 校验、超时、重传与 2 % ACK 丢包注入均按原样发生，可以验证协议栈与时序逻辑的正确性。", {
       x: M + 0.28, y: y0 + 4.02, w: 7.0, h: 0.72, fontFace: F, fontSize: 10.5,
       color: "1C6B47", isTextBox: true, margin: 0, valign: "top", lineSpacing: 14 });
-    T.foot(s, "虚拟配电室 1 131 行 · 驱动抽象层 2 277 行（四个 ABC + 桩 + 真机串口/V4L2）", 7);
+    T.foot(s, "虚拟配电室 1 131 行 · 驱动抽象层 2 277 行（四个 ABC + 桩 + 真机串口/V4L2）");
     s.addNotes("本页回答没有硬件如何开展工作。有两点：一是桩会注入真机上实际存在的故障，因此在桩上通过的验收是有意义的；二是真值与先验严格分开，感知读不到真值，精度数据不是自我核对得出的。假小车这一条可以证明真机驱动代码路径处于可运行状态。");
   }
 
-  // ============================================================ 8 工作量总览
-  {
-    const s = pres.addSlide();
-    const y0 = T.head(s, "06", "工作量总览", "四周内完成一套可运行、可测量、可现场演示的系统");
-    const big = [["21 100", "行 Python 代码", C.amber], ["501", "项自动化测试", C.green],
-                 ["4 700", "行技术文档", C.steel], ["22", "次版本提交", C.text]];
-    big.forEach(([v, k, col], i) => {
-      const x = M + i * 3.10;
-      T.card(s, x, y0, 2.90, 1.24);
-      T.stat(s, x + 0.28, y0 + 0.16, 2.4, v, k, col);
-    });
-
-    const mods = [
-      ["patrol/perception", "3 665", "四路模型 + 融合仲裁 + 成像质量"],
-      ["tests", "5 900", "501 项用例，覆盖率 75 %"],
-      ["patrol/tools", "2 534", "校验 / 预览 / 标定 / 整定 / 假小车"],
-      ["patrol/drivers", "2 277", "四个抽象基类 + 桩 + 真机串口"],
-      ["training", "1 418", "数据集接入 / 三类训练 / ONNX·RKNN 导出"],
-      ["patrol/mission", "1 309", "十状态机 / PID 伺服 / 抑制 / 预算"],
-      ["patrol/scene", "1 131", "针孔光学 / 世界模型 / 表计绘制"],
-      ["patrol/common", "869", "双时间戳 / 报文构造 / ZeroMQ 封装"],
-      ["patrol/uploader", "918", "证据打包 / 断点续传 / 保留策略"],
-      ["patrol/gateway", "697", "五项校验 / 参数硬限 / 心跳看门狗"],
-      ["cloud", "500", "FastAPI + SQLite 台账 + 五个页签"],
-    ];
-    const rows = [[T.th("模块"), T.th("行数"), T.th("职责")]];
-    mods.forEach(m => rows.push([
-      T.td(m[0], { fontSize: 10.5, bold: true }),
-      T.td(m[1], { fontSize: 10.5, align: "right", color: C.amber, bold: true }),
-      T.td(m[2], { fontSize: 10.5 })]));
-    T.table(s, rows, { x: M, y: y0 + 1.44, w: 7.55, colW: [2.15, 0.90, 4.50], rowH: 0.242 });
-
-    const extra = [["5", "份冻结 JSON Schema", "四条接口的契约，全部 additionalProperties: false"],
-                   ["12", "份技术文档", "架构、设计思想、ICD、代码地图、新手上路、演示指南…"],
-                   ["4", "路识别模型", "L1 检测 / L2 分割 + OCR / L3 异常 / L4 显式仲裁"],
-                   ["9", "个可当场演示的能力", "越界拒绝、看门狗接管、200 ms 中止、变焦对比…"]];
-    extra.forEach(([v, t, d], i) => {
-      const y = y0 + 1.44 + i * 0.94;
-      T.card(s, M + 7.86, y, 4.23, 0.84);
-      s.addText(v, { x: M + 8.06, y, w: 0.72, h: 0.84, align: "center", fontFace: F,
-        fontSize: 21, bold: true, color: C.amber, isTextBox: true, margin: 0, valign: "middle" });
-      s.addText(t, { x: M + 8.80, y: y + 0.10, w: 3.20, h: 0.30, fontFace: F, fontSize: 11.5,
-        bold: true, color: C.text, isTextBox: true, margin: 0, valign: "middle" });
-      s.addText(d, { x: M + 8.80, y: y + 0.40, w: 3.20, h: 0.38, fontFace: F, fontSize: 9.3,
-        color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 12 });
-    });
-    T.foot(s, "统计口径：git 仓库实测，不含空行与第三方依赖", 8);
-    s.addNotes("本页讲工作量。重点不在总行数，而在构成：测试 5 900 行，与核心业务代码规模接近，说明测试与功能是同步写的，不是最后补的。文档 4 700 行，保证其他人接手时有依据可循。");
-  }
-
-  // ============================================================ 9 质量保障
-  {
-    const s = pres.addSlide();
-    const y0 = T.head(s, "07", "质量保障：如何保证系统是真的可运行，而不是仅在设计上成立", "三项检查，每次提交前全部执行");
-    const gates = [
-      ["接口一致性校验", "51 项", "Schema 与代码、网关硬编码常量与 Schema 范围逐条交叉比对。" +
-        "其中 9 条为反例，构造越界报文，必须全部被拦截。", C.amber, "python -m patrol.tools.validate"],
-      ["自动化测试", "501 项", "覆盖率 75 %。含端到端 300 s 全链路、串口协议往返、状态机超时、" +
-        "网关五项校验、云端台账、证据保留策略。", C.green, "python -m pytest -q"],
-      ["端到端实跑", "300 s", "起全系统跑一轮真实巡检，产出证据包并统计复核增益。" +
-        "没有产出数据即视为未跑通，不接受仅在设计上成立的结论。", C.steel, "python -m patrol.tools.run_all --seconds 300"],
-    ];
-    gates.forEach(([t, n, d, col, cmd], i) => {
-      const x = M + i * 4.13;
-      T.card(s, x, y0, 3.87, 3.30);
-      s.addText(n, { x: x + 0.28, y: y0 + 0.20, w: 3.3, h: 0.62, fontFace: F, fontSize: 30,
-        bold: true, color: col, isTextBox: true, margin: 0, valign: "middle" });
-      s.addText(t, { x: x + 0.28, y: y0 + 0.86, w: 3.3, h: 0.34, fontFace: F, fontSize: 14,
-        bold: true, color: C.text, isTextBox: true, margin: 0, valign: "middle" });
-      s.addText(d, { x: x + 0.28, y: y0 + 1.26, w: 3.32, h: 1.44, fontFace: F, fontSize: 11,
-        color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 15 });
-      T.card(s, x + 0.20, y0 + 2.76, 3.47, 0.40, C.ink);
-      s.addText(cmd, { x: x + 0.32, y: y0 + 2.76, w: 3.25, h: 0.40, fontFace: "Courier New",
-        fontSize: 8.5, color: C.amber, isTextBox: true, margin: 0, valign: "middle" });
-    });
-
-    T.card(s, M, y0 + 3.54, W - M * 2, 1.52, C.amberSoft);
-    s.addText("一条贯穿全项目的记录原则：没有测到的写「未测」，测出来不理想的照实写", {
-      x: M + 0.34, y: y0 + 3.70, w: 11.4, h: 0.36, fontFace: F, fontSize: 14.5, bold: true,
-      color: "8A5A05", isTextBox: true, margin: 0, valign: "middle" });
-    s.addText("例如重复性 0.321 % FS 超出 0.3 % 的限值，我们把它写在 README 首页，而不是通过调整参数让它落进限值。" +
-      "后一种做法只是掩盖了误差来源。指标偏低通常可以解释，指标来源不清则无法解释。", {
-      x: M + 0.34, y: y0 + 4.10, w: 11.4, h: 0.82, fontFace: F, fontSize: 11.5,
-      color: "8A5A05", isTextBox: true, margin: 0, valign: "top", lineSpacing: 16 });
-    T.foot(s, "三项检查在每次提交前全部执行；validate 不通过就不提交", 9);
-    s.addNotes("本页讲质量保障。三项检查各是一条命令，可以当场演示。最后一段是我们一直遵守的记录原则：重复性超差主动写在 README 首页，不做修饰。");
-  }
 };

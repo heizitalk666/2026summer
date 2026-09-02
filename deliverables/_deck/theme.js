@@ -24,6 +24,19 @@ const C = {
 };
 
 const F = "Microsoft YaHei";
+
+// 页码与章节号自动递增。手工编号在插页时必然出错，这里集中管理。
+let PAGE = 0, SEC = 0;
+/** 新建一页并计数。所有页都必须经由它创建，页码才对得上。 */
+function slide(pres) { PAGE += 1; return pres.addSlide(); }
+/** 当前页码，供不走 foot() 的深色页直接取用。 */
+function pageNow() { return PAGE; }
+/** 章节号：传字符串则用它（如封面的「目」），否则自动递增两位数。 */
+function secNo(override) {
+  if (override) return override;
+  SEC += 1;
+  return (SEC < 10 ? "0" : "") + SEC;
+}
 const W = 13.333, H = 7.5;          // LAYOUT_WIDE
 const M = 0.62;                      // 页边距
 
@@ -36,6 +49,7 @@ function darkBg(s) {
 
 /** 内容页页眉：琥珀圆环 + 章节号 + 标题 + 可选副标题。返回正文起始 y。 */
 function head(s, num, title, sub) {
+  num = secNo(num === "auto" ? null : num);
   s.addShape("ellipse", {
     x: M, y: 0.42, w: 0.54, h: 0.54,
     fill: { color: C.white }, line: { color: C.amber, width: 2.25 },
@@ -61,6 +75,7 @@ function head(s, num, title, sub) {
 
 /** 页脚：左侧说明 + 右侧页码 */
 function foot(s, note, page) {
+  if (page === undefined) page = PAGE;
   if (note) {
     s.addText(note, {
       x: M, y: H - 0.52, w: W - M * 2 - 0.9, h: 0.3,
@@ -149,4 +164,4 @@ function td(text, o) {
   return { text, options: Object.assign({ fontSize: 11.5 }, o || {}) };
 }
 
-module.exports = { C, F, W, H, M, darkBg, head, foot, card, stat, badge, cardTitle, bullets, table, th, td };
+module.exports = { C, F, W, H, M, slide, pageNow, darkBg, head, foot, card, stat, badge, cardTitle, bullets, table, th, td };
