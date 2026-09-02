@@ -1,70 +1,91 @@
-# L3 未知异常检测（非监督） 交付
+# 丙 · L3 未知异常检测 交付
 
-> 状态：**空模板，待丙填**。带 `⬜` 的是要填的格子。
-> 模板出处：[`docs/交付物清单.md`](../../docs/交付物清单.md) §一页纸模板。
-> 这一页要直接粘进 PPT，**保持一页**；长的东西放 [`避坑清单.md`](避坑清单.md)。
->
-> 分工书里丙这一节：`docs/后续计划与分工.md:241-278`。
-> **你是三个人里唯一第一天就能开工的**——正常样本本地生成，不用等任何下载。
+> 对应任务书第 3 项「未知异常检测」+ 第 2 项「模型部署」的导出链路。
 
 ## 一句话结论
 
-⬜ 一句话。例："在同一批 xx 正常 / xx 异常样本上，EfficientAD 的误报 x %、
-漏报 x %，与零权重统计法的 x % / x % 持平/更好/更差；权重 xx MB，
-INT8 掉点 x 个百分点。"
-
-**赢不了统计法也是结论**，写清楚即可——任务书要的是「调研并比选后确定方案」。
+同一批评测集上,**PaDiM 标准版(全协方差)**把异常漏报率从统计法的 90.8 %
+压到 **3.3 %**,误报率 3.8 %——训练集经过"复核几何 + 检测框抖动"增广后,
+标准做法全面胜出;EfficientAD 简化蒸馏实测分数倒挂(漏报 100 %),未采用,
+原因与数据一并记录在案。
 
 ## 关键数字
 
-| 方法 | 误报率 | 漏报率 | 权重大小 | 可解释 | 结论 |
-|---|---|---|---|---|---|
-| 统计法（现默认，零权重） | ⬜ | ⬜ | 0 | ✅ 说得清哪个通道 | 基线 |
-| EfficientAD（你训的） | ⬜ | ⬜ | ⬜ | ❌ | ⬜ |
+评测条件:训练集 = **796 张正常裁片**(gen_synthetic 密度分层 259 张 +
+复核几何/检测框抖动增广 537 张);评测集 = 另种子正常裁片 106 张 +
+**异常裁片 120 张**(场景 FOREIGN_OBJECT 60 + 训练与场景都没见过的
+合成贴片 60);阈值统一 0.55。
 
-> ⚠ **两行必须在同一批样本上测**，且样本数要写出来。
-> 统计法在现有样本上的成绩是 **72 正常 / 12 异常，误报漏报皆为 0**
-> （`patrol/perception/anomaly.py:84` 的 docstring）。
-> **在同一批样本上它已经满分，学习法最多打平**——所以这张表要有意义，
-> 得先有一批更难的样本。详见 [`避坑清单.md`](避坑清单.md) 第 1 节。
+| 指标 | 统计法(基线,零权重) | EfficientAD(简化蒸馏) | PaDiM(对角) | **PaDiM(全协方差,采用)** |
+|---|---|---|---|---|
+| 误报率(正常裁片) | **1.9 %** | 0.0 % | 3.8 % | 3.8 % |
+| 漏报率(异常裁片 120) | 90.8 % | 100.0 %(分数倒挂) | 48.3 % | **3.3 %** |
+| 正常均分 / 异常均分 | 0.03 / 0.36 | 0.07 / 0.00 | 0.04 / 0.56 | 0.06 / **0.95** |
+| 权重大小 | 1.6 KB | 2.8 MB | 3.1 MB | ~44 MB(含 1024×100² 协方差) |
+| 可解释 | ✅ 说得清哪个通道 | ❌ | ❌ | ❌ |
+| 单次打分(CPU) | 6 ms | 未启用 | 22 ms | 26 ms(部署目标 NPU) |
 
-**部署指标**（方案书要的那一组）：
+**两个决定结果的实测发现(写进报告,比数字本身更值钱)**:
 
-| 项 | FP32 | INT8 | 掉点 |
-|---|---|---|---|
-| 异常分 AUC（或误报/漏报） | ⬜ | ⬜ | ⬜ |
-| 单帧耗时 | ⬜ | ⬜ | — |
-| 权重大小 | ⬜ | ⬜ | — |
+1. **训练裁片必须模拟运行时的检测框噪声。** 系统喂给 L3 的是检测框(有
+   抖动),会把表盘"切边"——实测切边 12 % 的正常表盘,异常分从 0.5 跳到
+   1.0。增广集加入抖动框后,系统实测的复核 ROI(600 s 跑出来的 6 张)从
+   "全部 1.0 误报"回到正常分(0.00-0.09)。
+2. **L3 与 L2 的分工在这个数据上看得见**:开位开关被 L2 判
+   READING_ABNORMAL(状态异常,外观正常),L3 对它的外观给正常分——外观
+   异常(FOREIGN_OBJECT)才是 L3 的菜,两层各司其职。
 
 ## 图
 
-| 文件 | 内容 | 进 PPT 哪一页 | 状态 |
-|---|---|---|---|
-| `figures/score_dist.png` | 正常 vs 异常的异常分分布（两个直方图叠一起） | 异常检测页 | ⬜ |
-| `figures/compare.png` | 统计法 vs EfficientAD | 方案比选页 | ⬜ |
+![异常分分布](figures/score_dist.png)
+四种方法的正常/异常分数分布(竖线 = 阈值 0.55)。全协方差 PaDiM 两簇几乎
+完全分开,对角版在增广后区分度下降,统计法只抬不越线,EfficientAD 倒挂。
 
-`score_dist.png` 是这一路最好讲的一张图：**两堆分数分得开不开，一眼就看出来**。
-坐标轴记得标 σ 或阈值线。
+![误报漏报对比](figures/compare.png)
+同批评测上的误报率/漏报率条形图。
+
+![ROC 曲线](figures/roc.png)
+阈值 0→1 扫描。全协方差 PaDiM 贴左上角,整条曲线站得住。
 
 ## 怎么复现
 
 ```bash
-# 正常样本：合成
+# 1. 正常样本集 + 复核几何/抖动框增广(CPU,约 3 分钟)
 python -m training.gen_synthetic --n 300 --out training/datasets/normal_patches
-python -m training.train_anomaly --data training/datasets/normal_patches --device ⬜
+python -m training.augment_verify_geometry
 
-# 更好的一条路：拿跑出来的证据包当正常样本，比合成的更接近真实分布
-python -m patrol.tools.run_all --seconds 300
-python -m training.train_anomaly --from-evidence evidence/ --device ⬜
+# 2. 四种方法
+python -m training.train_anomaly --data training/datasets/normal_patches \
+    --backend statistical --out training/runs/anomaly/baseline.json
+python -m training.train_anomaly --data training/datasets/normal_patches \
+    --backend padim_cov --device cpu --out training/runs/anomaly/padim_cov.pt
+python -m training.train_anomaly --data training/datasets/normal_patches \
+    --backend padim --device cpu --out training/runs/anomaly/padim.pt
+python -m training.train_anomaly --data training/datasets/normal_patches \
+    --backend efficientad --device cpu --epochs 50
 
-# 导出（量化校准集默认就从 evidence/ 取，见 避坑清单 第 3 节）
-python -m training.export_onnx --weights ⬜ --out artifacts/l3.onnx
-python -m training.export_rknn --weights ⬜
+# 3. 同批评测 + 出图(评测集自动生成)
+python -m training.bench_anomaly --out deliverables/丙-异常/figures
+
+# 4. ONNX 导出与冒烟
+python -m training.export_padim_onnx
 ```
 
-`--backend` 可选 `auto` / `efficientad` / `statistical`，默认 `auto`：
-依赖装齐走 EfficientAD，装不齐自动退回统计法——**装不上也不会卡住你**。
+接进系统:configs/system.yaml 已设 `perception.l3.model: padim_s` +
+`weights: training/runs/anomaly/padim_cov.pt`(权重里带全协方差,推理侧自动
+按 arch 切换打分);权重缺失或 torch 未装时自动退回统计法。L3 只对 ≥60 px
+的检出打分(训练分布同源,巡航期异常目标 ≈83 px 仍被扫到)。
 
 ## 未做 / 未验证
 
-⬜ 老实写，没有就写「无」。
+- **L3 结论进证据包**:DetectionEvent 携带 l3_anomaly,但 manifest 目前不落
+  盘 L3 字段(接口冻结,增字段要走 ICD 评审)
+- **RKNN 转换与 INT8 掉点**:rknn-toolkit2 仅支持 x86 Linux,本机 Windows
+  无 WSL。ONNX 导出与冒烟已通过(逐元素差 <4e-6,正常/异常分离 17 倍),
+  转换脚本与校准集已备好,见 artifacts/rknn_export.md
+- **上板测速**:缺 RK3576 板子
+- **EfficientAD 完整版**(多层特征 + 自编码器分支 + 难例挖掘):简化蒸馏版
+  实测倒挂后未继续投入,理由与数据见 artifacts/l3_report.json
+- **证据包当训练集**:600 s 实测只攒 6 张正常 ROI(抑制规则限制重复复核),
+  数量不足以单独训练;这 6 张在最终模型上全部正常分——作为分布覆盖的
+  sanity check 通过,但"证据包路线"需要更长采集时间,结论如实记录

@@ -1,0 +1,14 @@
+{
+  "onnx_ops": "opset 12",
+  "input": "bgr-uint8 → float32 0-1 RGB 256×256",
+  "outputs": [
+    "[1,128,32,32]",
+    "[1,256,16,16]"
+  ],
+  "smoke_max_diff": {
+    "net2": 3.3676624298095703e-06,
+    "net3": 2.682209014892578e-06
+  },
+  "raw_topk_normal_mean": 49.81006088256836,
+  "raw_topk_anomaly_mean": 840.855517578125
+}
