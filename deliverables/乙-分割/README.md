@@ -14,7 +14,7 @@ U-Net 把针的分割 IoU 从 numpy 基线的 **0.384 提到 0.778**，但在合
 | 针的 IoU（U-Net，合成+PaddleX） | **0.778** | numpy 基线 0.384（文档旧记录 0.182） | ✅ |
 | 针的 IoU（numpy 基线，合成+PaddleX） | 0.384 | 合成集 0.251 | ✅ 真实数据 +0.13 |
 | 级联读数误差（U-Net） | 0.07–0.19 %FS | 几何法 0.06–0.14 %FS | ❌ 未优于 |
-| 级联单次耗时（U-Net，onnxruntime CPU） | ≈ 59 ms | 复核预算 3000 ms | ✅ 预算内 |
+| 级联单次耗时（U-Net，onnxruntime CPU） | ≈ 59 ms | 复核预算 **2500 ms**（`configs/system.yaml:166` VERIFY: 2.5） | ✅ 占 2.4 % |
 | PaddleX 分割集转换 | 414 张全部成功 | 掩膜错位靠人眼核对 | ✅ |
 
 > 读数误差是 `bench_models --only reading` 在**合成表盘**上、按像素密度分档的
@@ -26,7 +26,16 @@ U-Net 把针的分割 IoU 从 numpy 基线的 **0.384 提到 0.778**，但在合
 ![掩膜核对](figures/mask_check.png)
 
 左：合成掩膜（`gen_synthetic --preview`），右：PaddleX 真实标注叠加
-（`--from-paddlex` 的 `check/`）。针=蓝、刻度=橙、盘面=绿。掩膜错位在数字上
+（`--from-paddlex` 的 `check/`）。**针=红、刻度=蓝、盘面=绿。**
+
+> ⚠️ **已提交的这张 PNG 图例是错的**（写成「针=蓝、刻度=橙」），
+> 原因是图例色块把 BGR 常量当 RGB 传给了 matplotlib——图做了 `cvtColor`、
+> 图例没做。`make_figures.py` 已修，但重新出图要本地的 `datasets/`（仓库里没有），
+> **请乙 重跑一次 `make_figures.py` 并替换这张图**。
+>
+> 好消息：**图本身和类别映射都是对的**，只有图例说反了。但这张图是
+> 「PaddleX 接对了」的唯一证据，图例说反等于自己拆自己的台——看图的人会
+> 据此判定针和刻度映射反了。掩膜错位在数字上
 完全看不出来，只有画回图上才看得见——这张图就是"真实数据接对了"的证据。
 
 ![针的 IoU 对比](figures/iou_compare.png)

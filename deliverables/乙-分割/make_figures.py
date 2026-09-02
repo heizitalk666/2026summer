@@ -42,12 +42,21 @@ def mask_check():
         ax.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
         ax.set_title(title, fontsize=11)
         ax.set_xticks([]); ax.set_yticks([])
-    fig.suptitle("分割标注叠加核对：针=蓝、刻度=橙、盘面=绿（灰=忽略区）", fontsize=12)
-    # 图例色块
+    fig.suptitle("分割标注叠加核对：针=红、刻度=蓝、盘面=绿（灰=忽略区）", fontsize=12)
+    # 图例色块。
+    #
+    # **这里必须和上面的 imshow 一样做 BGR→RGB。**prepare_dataset._seg_check 与
+    # gen_synthetic.draw_check 里的常量是 OpenCV 的 BGR，而 matplotlib 的
+    # color= 收的是 RGB。图转了、图例没转的话，图例会把针说成蓝、刻度说成橙，
+    # 而图上明明是针红刻度蓝——看图的人会据此判定"针和刻度这两类映射反了"，
+    # 从而否掉一个其实正确的转换结果。图例自己拆自己的台，比没有图例更糟。
     from matplotlib.patches import Patch
-    handles = [Patch(color=(60 / 255, 60 / 255, 235 / 255), label="needle 针"),
-               Patch(color=(200 / 255, 160 / 255, 60 / 255), label="ticks 刻度"),
-               Patch(color=(90 / 255, 140 / 255, 60 / 255), label="face 盘面")]
+    def _rgb(bgr):
+        b, g, r = bgr
+        return (r / 255, g / 255, b / 255)
+    handles = [Patch(color=_rgb((60, 60, 235)), label="needle 针"),
+               Patch(color=_rgb((200, 160, 60)), label="ticks 刻度"),
+               Patch(color=_rgb((90, 140, 60)), label="face 盘面")]
     fig.legend(handles=handles, loc="lower center", ncol=3, fontsize=10)
     fig.tight_layout(rect=[0, 0.05, 1, 0.94])
     fig.savefig(FIG / "mask_check.png", dpi=150, bbox_inches="tight")
