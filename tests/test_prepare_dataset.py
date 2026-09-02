@@ -145,3 +145,69 @@ def test_check_overlays_are_written_for_human_review(tmp_path):
     src, out = make_paddlex(tmp_path / "px"), tmp_path / "out"
     cmd_from_paddlex(src, out)
     assert list((out / "check").glob("*.jpg"))
+
+
+# ------------------------------------------------------------ train/val 泄漏
+#
+# 盯的是一处**不报错、只让指标虚高**的失效：Roboflow 导出常把同一张原图增广成
+# 多张副本，副本跨了 train/val，验证集里就有训练集的近邻。mAP 会好看，而没有
+# 任何一步会红。实测巡航级 epoch 1 就有 mAP50 0.976——那个数必须先排除这个
+# 可能才敢往报告里写。
+#
+# 判据只能按「原图」而不能按文件名：副本的文件名各不相同，比文件名一个都查不出来。
+
+from training.prepare_dataset import cmd_check_leak, source_key
+
+
+def _yolo_tree(root, train_names, val_names):
+    for split, names in (("train", train_names), ("val", val_names)):
+        d = root / "images" / split
+        d.mkdir(parents=True, exist_ok=True)
+        for n in names:
+            cv2.imwrite(str(d / n), np.zeros((8, 8, 3), np.uint8))
+    return root
+
+
+def test_augmented_copies_of_one_photo_share_a_source_key():
+    """同一张原图的两个增广副本，文件名不同但 source_key 必须相同。"""
+    a = "IMG_0042_jpg.rf.5c1a9f0e8b7d4a2c9e6f1b3d8a4c7e20.jpg"
+    b = "IMG_0042_jpg.rf.ffffffffffffffffffffffffffffffff.jpg"
+    assert source_key(a) == source_key(b) == "IMG_0042_jpg"
+
+
+def test_non_roboflow_names_only_collide_when_actually_identical():
+    """不是 Roboflow 导出的名字，只有完全同名才算同一张——不能误报。"""
+    assert source_key("cabinet_01.jpg") != source_key("cabinet_02.jpg")
+    assert source_key("cabinet_01.jpg") == source_key("cabinet_01.png")
+
+
+def test_a_clean_split_passes(tmp_path, capsys):
+    _yolo_tree(tmp_path,
+               ["A_jpg.rf.%032x.jpg" % 1, "B_jpg.rf.%032x.jpg" % 2],
+               ["C_jpg.rf.%032x.jpg" % 3])
+    assert cmd_check_leak(tmp_path) == 0
+    assert "PASS" in capsys.readouterr().out
+
+
+def test_a_copy_of_the_same_photo_in_both_splits_is_caught(tmp_path, capsys):
+    """train 和 val 各有一张来自 A 的副本——文件名完全不同，但必须抓出来。"""
+    _yolo_tree(tmp_path,
+               ["A_jpg.rf.%032x.jpg" % 1, "B_jpg.rf.%032x.jpg" % 2],
+               ["A_jpg.rf.%032x.jpg" % 9])
+    assert cmd_check_leak(tmp_path) == 1
+    out = capsys.readouterr().out
+    assert "FAIL" in out and "A_jpg" in out
+
+
+def test_it_reports_how_much_of_val_is_tainted(tmp_path, capsys):
+    """报告的是「val 有多少比例被牵连」——决定这批指标还能不能用。"""
+    _yolo_tree(tmp_path,
+               ["A_jpg.rf.%032x.jpg" % 1],
+               ["A_jpg.rf.%032x.jpg" % 2, "Z_jpg.rf.%032x.jpg" % 3])
+    assert cmd_check_leak(tmp_path) == 1
+    assert "1/2" in capsys.readouterr().out          # 一半的验证集被污染
+
+
+def test_a_missing_yolo_dir_says_what_to_run(tmp_path, capsys):
+    assert cmd_check_leak(tmp_path / "nope") == 1
+    assert "--to-yolo" in capsys.readouterr().out

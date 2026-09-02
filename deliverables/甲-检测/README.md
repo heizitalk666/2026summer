@@ -69,8 +69,9 @@ mAP50 **0.9949**、mAP50-95 **0.7513**、precision 0.9967、recall 0.9976。
 ## 怎么复现
 
 ```bash
-python -m training.prepare_dataset --check      # 先确认数据齐了，全绿再往下
+python -m training.prepare_dataset --check       # 先确认数据齐了，全绿再往下
 python -m training.prepare_dataset --to-yolo    # 转成 YOLO 格式
+python -m training.prepare_dataset --check-leak # 查 train/val 有没有增广副本串台
 
 python -m training.train_detector --stage cruise --device ⬜   # 巡航模型
 python -m training.train_detector --stage verify --device ⬜   # 复核模型

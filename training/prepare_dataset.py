@@ -94,6 +94,73 @@ def cmd_check() -> int:
     return 0 if ok else 1
 
 
+#: Roboflow 导出的文件名形如 ``<原名>_jpg.rf.<32位hash>.jpg``：同一张原图经
+#: 旋转/裁剪/调色增广出的多张副本，共享 ``.rf.`` 左边那一截，只有 hash 不同。
+_RF_SPLIT = ".rf."
+
+
+def source_key(filename: str) -> str:
+    """从文件名反推它来自哪张原图。
+
+    **这是查 train/val 泄漏的关键一步。**Roboflow 的增广副本文件名各不相同，
+    光比文件名一个重复都查不出来；但它们的 ``.rf.`` 左边那一截是同一个，
+    按那一截归组，跨 split 出现的组就是泄漏。
+
+    不含 ``.rf.`` 的名字（非 Roboflow 导出）退回用去扩展名的全名——
+    这时只有完全同名才算重复，不会误报。
+    """
+    stem = Path(filename).stem
+    if _RF_SPLIT in filename:
+        return filename.split(_RF_SPLIT, 1)[0]
+    return stem
+
+
+def cmd_check_leak(root: Path) -> int:
+    """查 YOLO 目录里 train 与 val 有没有来自同一张原图的增广副本。
+
+    **为什么要单独查这个。**增广副本跨了 split，验证集里就有训练集的近邻，
+    mAP 会虚高而且不报错——它看起来只是"模型训得好"。实测巡航级 epoch 1
+    就有 mAP50 0.976，这个数必须先排除泄漏才敢往报告里写。
+
+    转换脚本本身不制造泄漏（``cmd_to_yolo`` 沿用 Roboflow 自己的划分），
+    所以查的是**上游数据集**带不带这个毛病。
+    """
+    groups: dict[str, dict[str, list[str]]] = {}
+    counts = {}
+    for split in ("train", "val"):
+        d = root / "images" / split
+        if not d.exists():
+            print("找不到 %s，先跑 --to-yolo" % d)
+            return 1
+        names = [f.name for f in sorted(d.iterdir())
+                 if f.suffix.lower() in _IMG_EXT]
+        counts[split] = len(names)
+        for n in names:
+            groups.setdefault(source_key(n), {}).setdefault(split, []).append(n)
+
+    shared = {k: v for k, v in groups.items() if len(v) == 2}
+    print("  train %d 张 / val %d 张，归并成 %d 张原图"
+          % (counts["train"], counts["val"], len(groups)))
+
+    if not shared:
+        print("  \033[32mPASS\033[0m  没有原图同时出现在 train 和 val 里")
+        return 0
+
+    n_val_leaked = sum(len(v["val"]) for v in shared.values())
+    print("  \033[31mFAIL\033[0m  %d 张原图同时出现在两个 split 里，"
+          "牵连 val 的 %d/%d 张（%.1f %%）"
+          % (len(shared), n_val_leaked, counts["val"],
+             100.0 * n_val_leaked / max(1, counts["val"])))
+    for k, v in list(sorted(shared.items()))[:5]:
+        print("    %s\n      train: %s\n      val:   %s"
+              % (k, ", ".join(v["train"][:3]), ", ".join(v["val"][:3])))
+    if len(shared) > 5:
+        print("    …… 另有 %d 组" % (len(shared) - 5))
+    print("\n  验证集里有训练集的增广副本，mAP 会虚高。报告里要么按原图重新"
+          "划分后重训，要么如实写明这个局限。")
+    return 1
+
+
 def cmd_to_yolo(out: Path) -> int:
     """把原始标注统一到本项目的三类，输出标准 YOLO 目录。"""
     out.mkdir(parents=True, exist_ok=True)
@@ -321,6 +388,8 @@ def main() -> int:
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--to-yolo", action="store_true")
+    ap.add_argument("--check-leak", action="store_true",
+                    help="查 --to-yolo 产出的 train/val 有没有同一张原图的增广副本")
     ap.add_argument("--from-paddlex", default=None, metavar="DIR",
                     help="把 PaddleX 分割集转成 train_segmenter 能吃的结构")
     ap.add_argument("--background", default="ignore",
@@ -341,6 +410,8 @@ def main() -> int:
         return cmd_check()
     if a.to_yolo:
         return cmd_to_yolo(Path(a.out))
+    if a.check_leak:
+        return cmd_check_leak(Path(a.out))
     return cmd_list()
 
 
