@@ -2,60 +2,73 @@
 
 ```bash
 cd deliverables
-npm install pptxgenjs      # 只需一次
-node make_deck.js          # → deliverables/中期答辩.pptx
+npm install pptxgenjs                 # 只需一次
+NODE_PATH=$(pwd)/node_modules node make_deck.js   # → deliverables/中期答辩.pptx
 ```
+
+版式取自学院模板 `C424_PPT_2024`：顶部蓝色横幅、右上校徽、底部细条、左上「一.节名」
+标签、居中的白色圆角二级标题块。模板套版图切在 `img/tpl/`，几何尺寸与模板逐项对齐。
 
 ## 文件
 
-按学术答辩五段式组织，一个分节一个文件。
-
 | 文件 | 内容 |
 |---|---|
-| `../make_deck.js` | 入口：设版面（**LAYOUT_WIDE 必须在 addSlide 之前设**）、按顺序拼六个模块 |
-| `theme.js` | 配色、版式与组件：`slide()` `head()` `foot()` `card()` `table()` `divider()` `slot()`。**页码与章节号自动递增** |
-| `newpages.js` | 五段式补充的五页：现状分析、研究目标与结果、资料来源、创新点、参考文献 |
-| `sec0_cover.js` | 1–2：封面、目录 |
-| `sec1_bg.js` | 3–7：**一、研究背景和现状** |
-| `sec2_flow.js` | 8–13：**二、研究思路和结构** |
-| `sec3_method.js` | 14–33：**三、方法和研究内容** |
-| `sec4_sum.js` | 34–40：**四、总结与创新点** |
-| `sec5_ref.js` | 41–45：**五、参考文献与存在的不足** |
-| `img/` | 嵌入的图。三个人的交付图 + 本地生成的 zoom / thirdperson / PID 阶跃 |
+| `../make_deck.js` | 入口：设版面（**LAYOUT_WIDE 必须在 addSlide 之前设**）、按顺序拼两个正文模块 |
+| `theme.js` | 配色、模板套版与组件：`slide()` `head()` `foot()` `toc()` `card()` `stat()` `table()` `slot()`。**页码自动递增** |
+| `deck.js` | 第 1–15 页：封面、目录、**一 研究背景**、**二 关键难题与研究目标**、**三 前半**（总体方案、状态机、系统结构、数据流、研究方法、资料来源） |
+| `deck2.js` | 第 16–27 页：**三 后半**（识别层、L1、L2、L3、比选汇总、安全边界、云台与闭环）、**四 项目特色**、**五 计划与文献**、结束页 |
+| `qa_layout.py` | 版面自检：出界 / 底部留白 / 元素重叠 / 换行溢出。改完必跑 |
+| `img/` | 嵌入的图；`img/tpl/` 是从模板里切出来的套版图 |
 
-**页码不用手工维护。**所有页必须用 `T.slide(pres)` 创建，`T.foot(s, "说明")` 不传页码，
-`T.head(s, "auto", ...)` 自动递增章节号。插页删页都不用改别处，
-只有 `sec0_cover.js` 目录里的页码区间要跟着改。
+**页码不用手工维护。**所有页必须用 `T.slide(pres)` 创建，`T.foot(s, "说明")` 不传页码。
+分节页用 `T.toc(pres, 节号, "本节说明")`，当前节自动高亮。
 
-**分节页**用 `T.divider(pres, "一", "节名", "本节回答……", [要点数组])`，
-建议每节 5 条要点，4 条会留白偏多。
+## 版面上踩过的两个坑
+
+1. **表格的 `height` 是名义值。**pptxgenjs 写给表格 graphicFrame 的 `height` 恒为 1.0"，
+   真实高度要按行高求和；渲染器还会按内容再撑高行。靠 python-pptx 读 `shape.height`
+   判重叠会全部漏掉——`qa_layout.py` 因此自己按行高与换行重算表格高度。
+2. **图片素材直接决定文件大小。**pptxgenjs 不去重，同一张图用在 N 页就存 N 份。
+   套版图按 150 DPI 的实际显示尺寸重采样、无透明通道的转 JPEG 之后，
+   成品由 63 MB 降到 9 MB。目录页用的是单独裁切的 `toc_photo.jpg`，
+   直接拉伸整幅封面图会把 2:1 的照片压成 1:1。
 
 ## 明天上午补齐甲、乙
 
-两处槽位都在 `s2_models.js`，搜 `slot(` 就能找到：
+两处槽位都在 `deck2.js`，搜 `T.slot(` 就能找到：
 
-- **第 13 页** 甲 · L1 待补：复核级 mAP、单帧耗时、漏检率、增广对比、`--check-leak` 结果
-- **第 16 页** 乙 · L2 待补：核心图 `reading_error.png` 重画（n≥200、纵轴 P90）
+- **第 16 页** 甲 · L1 待补：复核级 yolo11m 的 mAP50 对比、单帧耗时（≤ 33 ms）、
+  漏检率（≤ 2 %）、切换 `detector: yolo` 后的 run_all 三轮对比、`--check-leak` 结果
+- **第 17 页** 乙 · L2 待补：核心比选图 `reading_error.png` 重画（n ≥ 200、纵轴改 P90）
 
-补齐做法：把新图放进 `img/`，把对应的 `slot(...)` 换成正常卡片或 `s.addImage(...)`，
-然后重跑 `node make_deck.js`。页码是硬编码在每页 `T.foot(s, ..., N)` 里的，
-**增删页要顺手改页码**。
+补齐做法：新图放进 `img/`，把对应的 `T.slot(...)` 换成 `T.card(...)` 或 `s.addImage(...)`，
+重跑 `make_deck.js`。页码自动重排，不用改别处。
+
+`T.slot()` 有两套排版：高度 ≥ 1.00" 走竖排（标题 / 条目 / 落款三段），
+0.72"–1.00" 走扁排（标题与落款并排一行、条目占第二行）。低于 0.72" 直接抛错，
+不会像以前那样静默把三段文字叠在一起。
 
 ## 改完必跑
 
 ```bash
-node make_deck.js
+NODE_PATH=$(pwd)/node_modules node make_deck.js
+python3 _deck/qa_layout.py 中期答辩.pptx                          # 版面自检
 python3 <pptx-skill>/scripts/office/validate.py 中期答辩.pptx     # 文件结构
 python3 <pptx-skill>/scripts/office/soffice.py --headless --convert-to pdf 中期答辩.pptx
-pdftoppm -jpeg -r 100 中期答辩.pdf slide                          # 逐页看有没有溢出/重叠
+pdftoppm -jpeg -r 100 中期答辩.pdf slide                          # 逐页看
 ```
 
-沙箱里 LibreOffice 默认只装了 core，要 `apt-get install libreoffice-impress poppler-utils`
+沙箱里 LibreOffice 默认只装 core，要 `apt-get install libreoffice-impress poppler-utils`
 才能转 PDF 和出图。
 
-## 数据口径
+## 内容口径
 
-页面上的数字**全部是本次实测**，不用文档旧值。两处与旧文档不一致的地方：
-
-- PID：README 旧值 0.9 % / 1.10 s / 47.6 %；本次实测 **3.0 % @1× · 1.0 % @3× · 关调度 37.7 %**
-- 端到端复核成功率：不写「100 %」，如实写 **75–83 %**（未达 85 % 目标），并说明主因
+- **任务书只有一份**：`22 基于RK3576边缘计算的无人车主动式AI巡检系统设计.docx`。
+  它规定的是能力要求，**没有给出任何数值指标**。PPT 里凡是数值指标，
+  页脚都注明「本组设定」，不能写成任务书要求。
+- 页面上的数字**全部是本次实测**，不用文档旧值。两处与旧文档不一致：
+  - PID：旧 README 写 0.9 % / 1.10 s / 47.6 %；本次实测
+    **3.0 % @1× · 1.0 % @3× · 关调度 37.7 %**
+  - 端到端复核成功率：不写「100 %」，如实写 **75–83 %**（未达 85 % 目标）并说明主因
+- 讲述重心是**采用的方案与选择理由**，不是工作量统计。第 9 页（3.1）是全篇主线：
+  一句话说清方案，再讲否定掉的两种备选和否定理由，最后引出三个子问题。

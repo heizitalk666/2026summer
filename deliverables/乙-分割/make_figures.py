@@ -4,7 +4,7 @@
     python deliverables/乙-分割/make_figures.py
 
 数字全部来自实测（训练日志 + bench_models 输出），不是手编的。跑这个脚本
-需要 matplotlib 与 opencv；中文字体取微软雅黑，没有的话退回默认字体。
+需要 matplotlib 与 opencv；中文字体按 雅黑 → 黑体 → 思源 → 文泉驿 的顺序回退。
 """
 from __future__ import annotations
 
@@ -16,7 +16,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-plt.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei", "DejaVu Sans"]
+# 中文字体按优先级回退：Windows 上取雅黑/黑体，Linux 上取思源或文泉驿，
+# 都没有才落到 DejaVu Sans（此时中文会显示为方块，图不可用）
+plt.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei",
+                                   "Noto Sans CJK SC", "Source Han Sans SC",
+                                   "WenQuanYi Zen Hei", "DejaVu Sans"]
 plt.rcParams["axes.unicode_minus"] = False
 
 HERE = Path(__file__).resolve().parent
@@ -66,22 +70,26 @@ def mask_check():
 
 def iou_compare():
     """针的 IoU 对比：numpy 基线（合成 / 合成+PaddleX）vs U-Net。"""
-    labels = ["numpy 逻辑回归\n合成集", "numpy 逻辑回归\n合成+PaddleX",
-              "U-Net\n合成+PaddleX"]
+    # 横轴标签两行、字数不等，6.4 英寸画布上会互相压字，加宽到 7.6 英寸并缩短文案
+    labels = ["numpy 基线\n仅合成集", "numpy 基线\n合成 + PaddleX",
+              "U-Net\n合成 + PaddleX"]
     vals = [0.251, 0.384, 0.778]
     colors = ["#9aa5b1", "#4a90d9", "#2e7d32"]
 
-    fig, ax = plt.subplots(figsize=(6.4, 4.4))
-    bars = ax.bar(labels, vals, color=colors, width=0.6)
+    fig, ax = plt.subplots(figsize=(7.6, 4.4))
+    bars = ax.bar(labels, vals, color=colors, width=0.55)
     ax.set_ylabel("针的 IoU（验证集，QUOTA 重平衡采样）", fontsize=11)
     ax.set_ylim(0, 1.0)
     ax.set_title("针的分割 IoU：U-Net 明显优于 numpy 基线", fontsize=12)
+    ax.tick_params(axis="x", labelsize=10)
     for bar, v in zip(bars, vals):
         ax.text(bar.get_x() + bar.get_width() / 2, v + 0.02, "%.3f" % v,
                 ha="center", fontsize=11, fontweight="bold")
     ax.axhline(0.182, color="crimson", linestyle="--", linewidth=1)
-    ax.text(4.02, 0.182, "旧基线 0.182\n（文档记录值）", color="crimson",
-            fontsize=9, va="center")
+    # 注记原来落在 x=4.02，超出三根柱子的坐标范围，tight bbox 会把画布拉宽并压窄坐标区；
+    # 贴着虚线放又会压在柱子上，改放到左上角的空白处，用文字说明虚线含义
+    ax.text(0.02, 0.95, "红色虚线：旧基线 0.182（文档记录值）", color="crimson",
+            fontsize=9.5, ha="left", va="top", transform=ax.transAxes)
     ax.grid(axis="y", alpha=0.3)
     fig.tight_layout()
     fig.savefig(FIG / "iou_compare.png", dpi=150, bbox_inches="tight")
