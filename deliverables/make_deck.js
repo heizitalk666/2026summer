@@ -17,12 +17,12 @@ pres.author = "配电室巡检系统项目组";
 pres.company = "测控系统综合实训";
 pres.title = "基于 RK3576 边缘计算的无人车主动式 AI 巡检系统 · 中期答辩";
 
-require(path.join(DIR, "s1_intro.js"))(pres, IMG);      // 封面 · 目录 · 课题 · 立论 · 复核流程 · 架构 · 无硬件
-require(path.join(DIR, "s1b_arch.js"))(pres, IMG);      // 技术路线 · 数据流 · 接口冻结 · 代码结构
-require(path.join(DIR, "s1c_scale.js"))(pres, IMG);     // 工作量 · 质量保障 · 完成度总表
-require(path.join(DIR, "s2_models.js"))(pres, IMG);     // 识别层 · 仲裁 · 甲 · 乙 · 丙 · 小结
-require(path.join(DIR, "s2b_results.js"))(pres, IMG);   // 甲分类表现 · 丙误报漏报 · 证据包与增益
-require(path.join(DIR, "s3_system.js"))(pres, IMG);     // 安全 · 云台 · 端到端 · 方法论 · 风险 · 下一步 · 结束
+require(path.join(DIR, "sec0_cover.js"))(pres, IMG);    // 封面 · 目录
+require(path.join(DIR, "sec1_bg.js"))(pres, IMG);       // 一、研究背景和现状
+require(path.join(DIR, "sec2_flow.js"))(pres, IMG);     // 二、研究思路和结构
+require(path.join(DIR, "sec3_method.js"))(pres, IMG);   // 三、方法和研究内容
+require(path.join(DIR, "sec4_sum.js"))(pres, IMG);      // 四、总结与创新点
+require(path.join(DIR, "sec5_ref.js"))(pres, IMG);      // 五、参考文献与存在的不足
 
 const out = path.join(__dirname, "中期答辩.pptx");
 pres.writeFile({ fileName: out }).then(() => console.log("已生成 " + out));

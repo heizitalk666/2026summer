@@ -1,13 +1,16 @@
-// 架构详解：技术路线、一次复核的数据流、接口冻结机制、代码分层
+// 二、研究思路和结构
 const T = require("./theme");
 const { C, F, W, H, M } = T;
+const P = require("./newpages");
 
 module.exports = function (pres, IMG) {
+
+  T.divider(pres, "二", "研究思路和结构", "本节回答：思路怎么展开？系统与内容按什么逻辑组织？", ["由三项约束推导出的四个设计决定", "总体方案：主动式复核的十状态流程", "系统结构：四进程、四接口、五份接口契约", "逻辑主线：一次复核的十二步数据流", "研究内容的组织方式：代码分层与模块职责"]);
 
   // ==================================================== 技术路线：四个设计决定
   {
     const s = T.slide(pres);
-    const y0 = T.head(s, "auto", "技术路线：从三项要求推出的四个设计决定",
+    const y0 = T.head(s, "auto", "研究思路：由三项约束推出的四个设计决定",
       "每个决定对应上一页的一项约束，可以逐条追溯到任务书要求");
     const D = [
       ["01", "两段式感知", "巡航期与复核期用不同的模型和不同的输入分辨率",
@@ -41,10 +44,104 @@ module.exports = function (pres, IMG) {
     s.addNotes("本页把技术选型与任务书要求对应起来。评审如果问某个设计的依据，答案在右侧一列。这四条决定互相支撑：接口先冻结，四个人才能并行开发；有驱动抽象，控制逻辑才能不等硬件；采用两段式采集，精度与时间预算才能同时满足。");
   }
 
+  // ============================================================ 5 主动式复核流程
+  {
+    const s = T.slide(pres);
+    const y0 = T.head(s, "auto", "总体方案：主动式复核的十状态流程", "十状态机。每个状态都定义了超时转移，不存在没有出边的状态");
+    const steps = [
+      ["CRUISE", "30 Hz 巡航\nL1 小模型扫描", C.steel],
+      ["SUSPECT", "连续三帧同一目标\n才确认，防抖动", C.steel],
+      ["HALT_REQ", "下发 PAUSE\n网关五项校验", C.amber],
+      ["AIM", "针孔几何前馈\n+ PID 残差闭环", C.amber],
+      ["ZOOM", "按 p_target 算倍率\n变焦到 120 px", C.amber],
+      ["VERIFY", "四路模型推理\nL4 显式仲裁", C.green],
+      ["PACK", "证据包组装\nbefore/after 配对", C.green],
+      ["RESUME", "恢复巡航\n写入抑制表", C.steel],
+    ];
+    const bw = 1.44, gap = 0.075;
+    steps.forEach(([n, d, col], i) => {
+      const x = M + i * (bw + gap);
+      T.card(s, x, y0 + 0.10, bw, 2.34);
+      s.addShape("rect", { x: x, y: y0 + 0.10, w: bw, h: 0.30,
+        fill: { color: col }, line: { color: col, width: 0.5 } });
+      s.addText(n, { x, y: y0 + 0.10, w: bw, h: 0.30, align: "center", valign: "middle",
+        fontFace: F, fontSize: 9.5, bold: true, color: C.white, isTextBox: true, margin: 0 });
+      s.addText(d, { x: x + 0.08, y: y0 + 0.48, w: bw - 0.16, h: 1.84, align: "center",
+        fontFace: F, fontSize: 10, color: C.text, isTextBox: true, margin: 0,
+        valign: "middle", lineSpacing: 15 });
+      if (i < steps.length - 1) {
+        s.addText("›", { x: x + bw - 0.02, y: y0 + 0.94, w: 0.14, h: 0.5, align: "center",
+          fontFace: F, fontSize: 15, bold: true, color: C.muted, isTextBox: true, margin: 0, valign: "middle" });
+      }
+    });
+
+    const notes = [
+      ["复核预算", "N_max = ⌊(T_max − L/v) / T_r⌋", "算得出这一趟还能复核几次，排不下的顺延到下一轮"],
+      ["三条抑制", "航点去重 / 定位失效 / 恢复静默", "同一个航点不重复停车，定位丢了就不再触发复核"],
+      ["安全优先", "安全事件 200 ms 内中止复核", "任何时刻安全事件都能打断正在进行的复核"],
+    ];
+    notes.forEach(([t, f, d], i) => {
+      const x = M + i * 4.13;
+      T.card(s, x, y0 + 2.72, 3.87, 2.12);
+      T.cardTitle(s, x + 0.26, y0 + 2.90, 3.4, t, C.amber);
+      s.addText(f, { x: x + 0.26, y: y0 + 3.28, w: 3.4, h: 0.32, fontFace: F, fontSize: 11,
+        bold: true, color: C.steel, isTextBox: true, margin: 0, valign: "middle" });
+      s.addText(d, { x: x + 0.26, y: y0 + 3.64, w: 3.42, h: 1.10, fontFace: F, fontSize: 11,
+        color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 15 });
+    });
+    T.foot(s, "实现：patrol/mission/fsm.py（598 行，十状态）· suppress.py（三条抑制）· budget.py（预算与顺延队列）");
+    s.addNotes("十个状态中这里画出八个主线状态，另外两个是 ABORT 和 ERROR。设计上有一条约束：每个状态都必须定义超时转移，因此状态机不会停在某个状态上不动。复核预算公式的作用是限制单轮巡检中复核的总次数，使主动复核不会超出 30 min 的巡检时间预算。");
+  }
+
+  // ============================================================ 6 架构
+  {
+    const s = T.slide(pres);
+    const y0 = T.head(s, "auto", "系统结构：四进程、四接口与五份接口契约", "进程边界按安全职责划分：安全网关必须在感知与任务进程异常退出后继续工作");
+    const procs = [
+      ["perception  感知", "相机、四路模型", "驱动以 passive 建，收不到指令", C.steel],
+      ["mission  任务", "十状态机、PID、预算", "不碰驱动，不碰模型", C.steel],
+      ["gateway  安全网关", "四个驱动实例（唯一）", "不碰模型、不碰图像", C.red],
+      ["uploader  上传", "证据目录、上传队列", "不碰驱动，不碰模型", C.steel],
+    ];
+    procs.forEach(([n, own, never, col], i) => {
+      const x = M + i * 3.10;
+      T.card(s, x, y0, 2.90, 2.20);
+      s.addText(n, { x: x + 0.22, y: y0 + 0.18, w: 2.5, h: 0.36, fontFace: F, fontSize: 13.5,
+        bold: true, color: col, isTextBox: true, margin: 0, valign: "middle" });
+      s.addText("拥有  " + own, { x: x + 0.22, y: y0 + 0.62, w: 2.5, h: 0.52, fontFace: F,
+        fontSize: 10.5, color: C.text, isTextBox: true, margin: 0, valign: "top", lineSpacing: 14 });
+      s.addText("绝不碰  " + never, { x: x + 0.22, y: y0 + 1.16, w: 2.5, h: 0.56, fontFace: F,
+        fontSize: 10.5, color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 14 });
+    });
+
+    const ifs = [
+      ["IF-1", "DetectionEvent", "感知 → 任务 / 上传", "PUB/SUB", "10 Hz + 按需"],
+      ["IF-2", "ControlCommand / Ack", "任务 → 网关", "REQ/REP", "事件驱动 + 5 Hz 心跳"],
+      ["IF-3", "StatusReport", "网关 → 所有人", "PUB/SUB", "20 Hz + 安全插播"],
+      ["IF-4", "EvidencePackage", "上传 → 云端", "HTTP / MQTT", "每次复核一包"],
+    ];
+    const rows = [[T.th("编号"), T.th("报文"), T.th("方向"), T.th("传输"), T.th("频率")]];
+    ifs.forEach(r => rows.push([
+      T.td(r[0], { bold: true, color: C.amber, align: "center" }),
+      T.td(r[1], { bold: true }), T.td(r[2]), T.td(r[3], { align: "center" }), T.td(r[4])]));
+    T.table(s, rows, { x: M, y: y0 + 2.44, w: 7.55, colW: [0.78, 2.12, 1.85, 1.10, 1.70], rowH: 0.40 });
+
+    T.card(s, M + 7.85, y0 + 2.44, 4.24, 2.66, C.ink);
+    s.addText("为什么非要拆四个进程", { x: M + 8.10, y: y0 + 2.66, w: 3.8, h: 0.34, fontFace: F,
+      fontSize: 13.5, bold: true, color: C.amber, isTextBox: true, margin: 0, valign: "middle" });
+    s.addText("安全网关必须是执行器的唯一入口，并且要在感知或任务进程异常退出后继续工作。" +
+      "放在同一进程内无法做到：一次段错误会同时终止两侧。\n\n" +
+      "「终止感知与任务进程后，车辆仍按路线走完」这条演示验证的就是这个边界。", {
+      x: M + 8.10, y: y0 + 3.10, w: 3.78, h: 1.86, fontFace: F, fontSize: 11,
+      color: C.mutedOnInk, isTextBox: true, margin: 0, valign: "top", lineSpacing: 16 });
+    T.foot(s, "五份 JSON Schema 全部 additionalProperties: false；改接口要走 validate.py 的 ALLOWED_DRIFT 白名单流程");
+    s.addNotes("本页回答架构复杂度的问题。四个进程的边界按安全职责划分，不按代码量划分。五份 Schema 是冻结的接口契约，修改任何一个字段都要走 ALLOWED_DRIFT 白名单流程，因此四个人可以并行修改各自的模块而不产生接口冲突。");
+  }
+
   // ==================================================== 一次复核的完整数据流
   {
     const s = T.slide(pres);
-    const y0 = T.head(s, "auto", "一次复核的完整数据流",
+    const y0 = T.head(s, "auto", "逻辑主线：一次复核的完整数据流",
       "十二步，跨四个边缘进程与云端。这条链路能完整走通，系统各层的接口就是对的");
     const rows = [[T.th("#"), T.th("进程"), T.th("动作"), T.th("代码位置")]];
     const steps = [
@@ -80,56 +177,10 @@ module.exports = function (pres, IMG) {
     s.addNotes("本页说明系统的运行过程。十二步跨四个进程与云端，每一步都能对应到具体文件。第 8、9 步走文件而不走总线，是因为 Schema 冻结后不允许新增字段，而证据目录本身就是 ICD 定义的契约。");
   }
 
-  // ==================================================== 接口冻结机制
-  {
-    const s = T.slide(pres);
-    const y0 = T.head(s, "auto", "接口怎么冻结：五份 Schema 与改动成本表",
-      "四个人并行开发的前提，是报文结构在开发过程中保持稳定");
-    const rows = [[T.th("Schema"), T.th("承载接口"), T.th("关键约束")]];
-    [["detection_event", "IF-1 感知到任务/上传", "trigger_rule 枚举含 CONF_BAND / L2_UNREADABLE / L3_ANOMALY 三级判据"],
-     ["control_command", "IF-2 任务到网关", "command 枚举 6 条；每条指令的参数范围与网关硬编码常量逐条比对"],
-     ["command_ack", "IF-2 网关回执", "ACCEPTED 时不得携带 reject_code；拒绝时必须给出失败的校验项"],
-     ["status_report", "IF-3 网关广播", "含云台位姿、底盘状态、安全事件；20 Hz 周期发送并支持插播"],
-     ["evidence_package", "IF-4 上传到云端", "verdict.result 六个取值；gain 三项增益指标；files[].role 枚举"],
-    ].forEach(r => rows.push([
-      T.td(r[0], { bold: true, fontSize: 10.5, color: C.steel }),
-      T.td(r[1], { fontSize: 10.5 }), T.td(r[2], { fontSize: 10.5, color: C.muted })]));
-    T.table(s, rows, { x: M, y: y0, w: 7.55, colW: [1.82, 2.05, 3.68], rowH: 0.50 });
-
-    T.card(s, M + 7.86, y0, 4.23, 3.00);
-    T.cardTitle(s, M + 8.10, y0 + 0.16, 3.8, "改动成本表", C.amber);
-    const cost = [["新增可选字段、新增枚举值", "次版本号 +1，通知即可", C.green],
-                  ["修改字段语义、类型、范围", "主版本号 +1，全组重评审，三个桩同步改", C.amber],
-                  ["增删指令白名单", "需重新评审安全边界，默认不批准", C.red]];
-    cost.forEach(([a, b, col], i) => {
-      const y = y0 + 0.58 + i * 0.80;
-      s.addText(a, { x: M + 8.10, y, w: 3.80, h: 0.30, fontFace: F, fontSize: 11,
-        bold: true, color: C.text, isTextBox: true, margin: 0, valign: "middle" });
-      s.addText(b, { x: M + 8.10, y: y + 0.30, w: 3.80, h: 0.44, fontFace: F, fontSize: 10,
-        color: col, isTextBox: true, margin: 0, valign: "top", lineSpacing: 13 });
-    });
-
-    const guard = [
-      ["51 项一致性校验", "Schema 与代码、网关硬编码常量与 Schema 范围逐条交叉比对，每次提交前执行"],
-      ["9 条反例", "构造越界报文与非法字段组合，必须全部被 Schema 拦截，防止校验形同虚设"],
-      ["ALLOWED_DRIFT 白名单", "确需偏离冻结基线时，必须登记在白名单中并说明理由，不允许未经登记直接增删字段"],
-    ];
-    guard.forEach(([t, d], i) => {
-      const y = y0 + 3.22 + i * 0.72;
-      T.card(s, M, y, W - M * 2, 0.64);
-      s.addText(t, { x: M + 0.28, y, w: 2.70, h: 0.64, fontFace: F, fontSize: 11.5,
-        bold: true, color: C.amber, isTextBox: true, margin: 0, valign: "middle" });
-      s.addText(d, { x: M + 3.06, y, w: 8.80, h: 0.64, fontFace: F, fontSize: 10.5,
-        color: C.muted, isTextBox: true, margin: 0, valign: "middle" });
-    });
-    T.foot(s, "五份 Schema 全部 additionalProperties: false；ICD 冻结于 M1（D3）评审");
-    s.addNotes("这一页讲接口治理。重点是改动成本表：不同类型的改动对应不同的评审要求，增删指令白名单默认不批准。加上 51 项校验和 9 条反例，接口在开发过程中就能保持稳定。");
-  }
-
   // ==================================================== 代码结构与模块职责
   {
     const s = T.slide(pres);
-    const y0 = T.head(s, "auto", "代码结构：每个模块负责什么",
+    const y0 = T.head(s, "auto", "研究内容的组织：代码分层与模块职责",
       "按职责分层。同一层内的模块可以互换实现，跨层调用不允许绕过既定接口");
     const layers = [
       ["cloud/", "云端", "500 行", C.steel,
@@ -165,4 +216,5 @@ module.exports = function (pres, IMG) {
     T.foot(s, "分层原则：同层可换实现，跨层不绕过接口。感知进程取不到执行器，网关进程不加载模型");
     s.addNotes("本页说明代码的组织方式。分层原则有两条：同一层内可以更换实现，例如检测器由合成检测器换成 YOLO，上层代码不需要修改；跨层调用不绕过既定接口，感知进程取不到执行器，网关进程不加载模型。");
   }
+
 };

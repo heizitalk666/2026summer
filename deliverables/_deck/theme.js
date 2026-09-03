@@ -1,7 +1,7 @@
 // 中期答辩 PPT —— 配色、版式与可复用组件
 //
 // 母题：琥珀圆环（呼应系统要读的压力表表盘），每个内容页标题左侧一个，内嵌章节号。
-// 结构：深—浅—深三明治（封面/方法论/结束页深底，内容页浅底）。
+// 结构：深、浅、深三段式（封面/方法论/结束页深底，内容页浅底）。
 // 纪律：不用标题下划线、不用色条色带。
 
 const C = {
@@ -88,6 +88,50 @@ function foot(s, note, page) {
   });
 }
 
+/** 分节页：深底，大号中文节名 + 本节要回答的问题清单 */
+function divider(pres, no, title, question, items) {
+  const s = slide(pres);
+  darkBg(s);
+  s.addShape("ellipse", { x: M, y: 1.55, w: 1.28, h: 1.28,
+    fill: { color: C.ink }, line: { color: C.amber, width: 2 } });
+  s.addText(no, { x: M, y: 1.55, w: 1.28, h: 1.28, align: "center", valign: "middle",
+    fontFace: F, fontSize: 40, bold: true, color: C.amber, isTextBox: true, margin: 0 });
+  s.addText(title, { x: M + 1.72, y: 1.62, w: 8.0, h: 0.76,
+    fontFace: F, fontSize: 34, bold: true, color: C.white,
+    isTextBox: true, margin: 0, valign: "middle" });
+  s.addText(question, { x: M + 1.76, y: 2.44, w: 9.6, h: 0.40,
+    fontFace: F, fontSize: 13.5, color: C.amber, isTextBox: true, margin: 0, valign: "middle" });
+  items.forEach((t, i) => {
+    const y = 3.30 + i * 0.70;
+    s.addShape("ellipse", { x: M + 1.76, y: y + 0.20, w: 0.13, h: 0.13,
+      fill: { color: C.amber }, line: { color: C.amber, width: 0.5 } });
+    s.addText(t, { x: M + 2.10, y, w: 9.3, h: 0.54, fontFace: F, fontSize: 12.5,
+      color: C.mutedOnInk, isTextBox: true, margin: 0, valign: "middle" });
+  });
+  s.addText(String(PAGE), { x: W - M - 0.6, y: H - 0.52, w: 0.6, h: 0.3, align: "right",
+    fontFace: F, fontSize: 10, color: C.mutedOnInk, isTextBox: true, margin: 0, valign: "middle" });
+  return s;
+}
+
+/** 待补齐槽位：琥珀虚线框 + 待补项清单 + 补入时间 */
+function slot(s, x, y, w, h, title, items, when) {
+  s.addShape("roundRect", { x, y, w, h, rectRadius: 0.06,
+    fill: { color: "FDF6E8" }, line: { color: C.amber, width: 1.75, dashType: "dash" } });
+  s.addShape("ellipse", { x: x + 0.30, y: y + 0.26, w: 0.40, h: 0.40,
+    fill: { color: C.amber }, line: { color: C.amber, width: 1 } });
+  s.addText("!", { x: x + 0.30, y: y + 0.26, w: 0.40, h: 0.40, align: "center", valign: "middle",
+    fontFace: F, fontSize: 15, bold: true, color: C.white, isTextBox: true, margin: 0 });
+  s.addText(title, { x: x + 0.84, y: y + 0.24, w: w - 1.1, h: 0.44, fontFace: F, fontSize: 16,
+    bold: true, color: "8A5A05", isTextBox: true, margin: 0, valign: "middle" });
+  s.addText(items.map((t, i) => ({ text: t,
+    options: { bullet: true, breakLine: i !== items.length - 1 } })), {
+    x: x + 0.84, y: y + 0.76, w: w - 1.2, h: h - 1.28,
+    fontFace: F, fontSize: 11.5, color: "6E4804", isTextBox: true, margin: 0,
+    paraSpaceAfter: 5, lineSpacing: 17 });
+  s.addText(when, { x: x + 0.84, y: y + h - 0.50, w: w - 1.2, h: 0.32, fontFace: F,
+    fontSize: 10.5, bold: true, color: C.amber, isTextBox: true, margin: 0, valign: "middle" });
+}
+
 /** 圆角卡片 */
 function card(s, x, y, w, h, fill) {
   s.addShape("roundRect", {
@@ -164,4 +208,4 @@ function td(text, o) {
   return { text, options: Object.assign({ fontSize: 11.5 }, o || {}) };
 }
 
-module.exports = { C, F, W, H, M, slide, pageNow, darkBg, head, foot, card, stat, badge, cardTitle, bullets, table, th, td };
+module.exports = { C, F, W, H, M, slide, pageNow, darkBg, divider, slot, head, foot, card, stat, badge, cardTitle, bullets, table, th, td };
