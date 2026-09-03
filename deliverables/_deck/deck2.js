@@ -1,13 +1,13 @@
 // 后半程：识别层、三路比选、比选汇总（含非技术因素）、安全、控制与闭环、创新点、计划、文献
 const T = require("./theme");
-const { C, F, FT, W, H, M } = T;
+const { C, F, W, H, M } = T;
 
 module.exports = function (pres, IMG) {
 
   // ============================================================ 识别层
   {
     const s = T.slide(pres);
-    const y0 = T.head(s, "三.识别层", "3.6　为什么不用一个大模型：四类模型分工与显式仲裁",
+    const y0 = T.head(s, "三.识别层", "3.8　为什么不用一个大模型：四类模型分工与显式仲裁",
       ["四路模型分工，结论交纯规则的 L4 仲裁",
       "四个子问题对算力、精度与输出形式的要求互相冲突；而判定依据必须逐条可追溯"]);
     const rows = [[T.th("子问题"), T.th("要回答"), T.th("模型类别"), T.th("为什么不能合并为一个模型")]];
@@ -33,7 +33,7 @@ module.exports = function (pres, IMG) {
         fill: { color: col }, line: { color: col, width: 0.5 } });
       s.addText(n, { x: M + 8.78, y, w: 2.35, h: 0.36, fontFace: F, fontSize: 9.5,
         bold: true, color: C.text, isTextBox: true, margin: 0, valign: "middle" });
-      s.addText(cn, { x: M + 11.16, y, w: 1.10, h: 0.36, fontFace: FT, fontSize: 9.5,
+      s.addText(cn, { x: M + 11.16, y, w: 1.10, h: 0.36, fontFace: F, fontSize: 9.5,
         color: C.muted, isTextBox: true, margin: 0, valign: "middle" });
     });
 
@@ -45,79 +45,67 @@ module.exports = function (pres, IMG) {
       T.card(s, M, y, W - M * 2, 0.56);
       s.addText(t, { x: M + 0.22, y, w: 3.05, h: 0.56, fontFace: F, fontSize: 10.5,
         bold: true, color: C.navy, isTextBox: true, margin: 0, valign: "middle" });
-      s.addText(d, { x: M + 3.42, y, w: 8.95, h: 0.56, fontFace: FT, fontSize: 9,
+      s.addText(d, { x: M + 3.42, y, w: 8.95, h: 0.56, fontFace: F, fontSize: 9,
         color: C.muted, isTextBox: true, margin: 0, valign: "middle", lineSpacing: 12 });
     });
-    T.foot(s, "实现：perception/fusion.py 纯规则 278 行，六种结论各有测试用例；未改动任何接口 Schema");
+    T.foot(s, "实现：perception/fusion.py，纯规则，六种结论各有测试用例");
     s.addNotes("识别层的总纲。评审可能问为什么不用一个端到端大模型，答案是四个子问题对算力、精度、输出形式的要求互相冲突。仲裁层用规则不用模型，直接对应任务书把可解释性列为必须考虑的非技术因素。");
   }
 
   // ============================================================ L1
   {
     const s = T.slide(pres);
-    const y0 = T.head(s, "三.识别层 L1", "3.7　L1 目标检测：为什么用公开集训练，为什么分两级阈值",
+    const y0 = T.head(s, "三.识别层 L1", "3.9　L1 目标检测：为什么用公开集训练，为什么分两级阈值",
       ["YOLO11 + 公开集权重，巡航级 0.25 与复核级 0.60 两套阈值",
       "巡航期只负担得起一路小模型；误报不在这一层消解，留给放大后的复核级"]);
-
-    const P = [
-      ["① 合成检测器", C.muted, "拿渲染器自己出图自己训，零成本、可离线复现，不依赖外部数据",
-       "纹理、光照与背景杂物都由渲染参数决定，上真机必然退化", "不采用，保留为无权重时的降级路径"],
-      ["② YOLO11 + 公开集", C.green, "distribution_room 2 773 张真实照片，CC BY 4.0，骨干 yolo11s",
-       "需注册账号并占用 GPU 工时，换来的是合成图给不了的纹理多样性", "采用；合成数据只用于增广"],
-    ];
-    P.forEach(([t, col, how, cost, concl], i) => {
-      const x = M + i * 6.30;
-      T.card(s, x, y0, 6.05, 2.16, i === 1 ? C.greenSoft : null);
-      s.addText(t, { x: x + 0.24, y: y0 + 0.10, w: 5.6, h: 0.32, fontFace: F, fontSize: 12.5,
-        bold: true, color: col, isTextBox: true, margin: 0, valign: "middle" });
-      s.addText("做法　" + how, { x: x + 0.24, y: y0 + 0.52, w: 5.60, h: 0.58, fontFace: FT,
-        fontSize: 9.6, color: C.text, isTextBox: true, margin: 0, valign: "top", lineSpacing: 12.5 });
-      s.addText("代价　" + cost, { x: x + 0.24, y: y0 + 1.12, w: 5.60, h: 0.58, fontFace: FT,
-        fontSize: 9.6, color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 12.5 });
-      s.addText(concl, { x: x + 0.24, y: y0 + 1.74, w: 5.60, h: 0.32, fontFace: F, fontSize: 10.5,
-        bold: true, color: col, isTextBox: true, margin: 0, valign: "middle" });
+    const st = [["0.9949", "mAP50", C.green], ["0.7513", "mAP50-95", C.blue],
+                ["0.9967", "precision", C.blue], ["0.9976", "recall", C.blue]];
+    st.forEach(([v, k, col], i) => {
+      const x = M + i * 2.20;
+      T.card(s, x, y0, 2.06, 1.02);
+      T.stat(s, x + 0.20, y0 + 0.08, 1.7, v, k, col);
     });
+    T.card(s, M + 8.86, y0, 3.52, 1.02, C.amberSoft);
+    s.addText("第 1 轮 mAP50 已达 0.9759，偏高。\n需先排除训练集与验证集之间的同源增广副本。", {
+      x: M + 9.06, y: y0, w: 3.16, h: 1.02, fontFace: F, fontSize: 9.5, bold: true,
+      color: "8A5200", isTextBox: true, margin: 0, valign: "middle", lineSpacing: 13 });
+    s.addImage({ path: IMG + "/l1_pr.png", x: M, y: y0 + 1.18, w: 3.30, h: 2.48 });
+    s.addImage({ path: IMG + "/l1_cm.png", x: M + 3.46, y: y0 + 1.18, w: 3.30, h: 2.48 });
+    // 左右两列同高：图片下沿 y0+3.66，槽位下沿 y0+3.86
 
-    T.card(s, M, y0 + 2.32, 6.05, 2.10);
-    T.cardTitle(s, M + 0.24, y0 + 2.44, 5.6, "0.25 与 0.60 这两个阈值是怎么定的");
-    s.addText("0.25 是巡航级的下限：再低，抑制规则挡不住的误触发会把复核预算吃光。\n" +
-      "0.60 是复核级的下限：低于它的目标在放大后仍判不实，与其给一个不可信的结论，" +
-      "不如输出「证据不足」交人复核。\n" +
+    T.card(s, M + 6.92, y0 + 1.18, 5.46, 1.14);
+    T.cardTitle(s, M + 7.14, y0 + 1.26, 5.0, "0.25 与 0.60 这两个阈值是怎么定的");
+    s.addText("0.25 是巡航级的下限：再低，抑制规则挡不住的误触发会把复核预算吃光。" +
+      "0.60 是复核级的下限：低于它的目标在放大后仍判不实，与其给一个不可信的结论，不如输出证据不足交人复核。" +
       "两级之差 Δconf 同时是复核增益的度量——它为正，说明这一次停车是值得的。", {
-      x: M + 0.24, y: y0 + 2.80, w: 5.60, h: 1.50, fontFace: FT, fontSize: 9.8,
-      color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 14, paraSpaceAfter: 3 });
-
-    T.card(s, M + 6.30, y0 + 2.32, 6.05, 0.86, C.amberSoft);
-    s.addText("训练已跑通：巡航级 mAP50 0.9949。但第 1 轮就到 0.9759，偏高，" +
-      "需先排除训练集与验证集之间的同源增广副本，结论出来前不把它当作定论。", {
-      x: M + 6.54, y: y0 + 2.32, w: 5.60, h: 0.86, fontFace: FT, fontSize: 9.6,
-      color: "70430A", isTextBox: true, margin: 0, valign: "middle", lineSpacing: 12.5 });
-    T.slot(s, M + 6.30, y0 + 3.30, 6.05, 1.56, "待补充的实测项（明日补入）",
+      x: M + 7.14, y: y0 + 1.56, w: 5.02, h: 0.70, fontFace: F, fontSize: 9.2,
+      color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 12.5 });
+    T.slot(s, M + 6.92, y0 + 2.44, 5.46, 1.42, "待补充的实测项（明日补入）",
       ["复核级 yolo11m 训练与 mAP50 对比", "单帧耗时（≤ 33 ms）与漏检率（≤ 2 %）",
        "切换 detector: yolo 后 run_all 三轮对比，以及 --check-leak 同源副本排查结果"],
-      "→ 明日由 L1 负责人提供后补入");
+      "→ 明日由 L1 负责人提供后重新出图");
 
-    T.card(s, M, y0 + 4.50, 6.05, 0.36, C.blueSoft);
-    s.addText("任务书点名可用 YOLO 系列与 MobileNet，本组选 YOLO11", {
-      x: M + 0.24, y: y0 + 4.50, w: 5.60, h: 0.36, fontFace: FT, fontSize: 9.2,
-      color: C.navy, isTextBox: true, margin: 0, valign: "middle" });
-    T.foot(s, "训练曲线与混淆矩阵在 deliverables/甲-检测/figures/ 里，答辩时按需调阅；与其余四个环节的比选一并列在 3.10");
-    s.addNotes("这一页讲的是选型，不是成绩单。两个候选摆出来：自己渲图训一个检测器零成本但纹理单一，" +
-      "公开集要花账号和显卡工时换纹理多样性——巡检车要上真机，纹理这一维不能省，所以选后者。" +
-      "指标只留一句，而且要主动说 0.9949 这个数偏高、第 1 轮就到 0.9759，排查还没做完，" +
-      "在结论出来之前我们不拿它当定论。主动说比被问到再解释好。");
+    T.card(s, M, y0 + 3.98, W - M * 2, 0.84, C.blueSoft);
+    s.addText("方案比选：合成检测器 vs 公开集训练的 YOLO　|　" +
+      "合成检测器零成本、可离线复现，但纹理单一，上真机必然退化；" +
+      "公开集训练需注册账号并占用 GPU 工时，换来纹理多样性。" +
+      "结论：权重从公开集训练，合成数据仅用于增广，理由是合成数据补的是密度分层而非纹理多样性。", {
+      x: M + 0.28, y: y0 + 3.98, w: 11.85, h: 0.84, fontFace: F, fontSize: 9.8,
+      color: C.navy, isTextBox: true, margin: 0, valign: "middle", lineSpacing: 13 });
+    T.foot(s, "任务书点名可用 YOLO 系列与 MobileNet，本组选 YOLO11");
+    s.addNotes("L1 巡航级已训完，指标较高。要主动说明第 1 轮就到 0.9759 这个数偏高，已写好 --check-leak 命令排查训练集与验证集的同源增广副本，明日出结果。主动说明比被问到再解释好。");
   }
 
   // ============================================================ L2
   {
     const s = T.slide(pres);
-    const y0 = T.head(s, "三.识别层 L2", "3.8　L2 读数：为什么仍以几何解算为默认实现",
+    const y0 = T.head(s, "三.识别层 L2", "3.10　L2 读数：为什么仍以几何解算为默认实现",
       ["几何解算（U-Net 保留不删）",
       "门槛以上三档 P90 误差最低且置信区间不重叠；零权重、可追溯"]);
     s.addImage({ path: IMG + "/l2_reading.png", x: M, y: y0, w: 7.30, h: 4.12 });
     s.addText("灰底两档为像素密度低于 96 px 的区间。fusion.py 的 DENSITY_FLOOR_FRAC = 0.80 " +
       "在此拒绝下任何读数类结论，系统本来就不在这里读数——这两档的差异不参与比选。", {
-      x: M, y: y0 + 4.16, w: 7.30, h: 0.44, fontFace: FT, fontSize: 8.8,
+      x: M, y: y0 + 4.16, w: 7.30, h: 0.44, fontFace: F, fontSize: 8.8,
       color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 12 });
 
     s.addImage({ path: IMG + "/l2_iou.png", x: M + 7.52, y: y0, w: 4.86, h: 2.78 });
@@ -127,7 +115,7 @@ module.exports = function (pres, IMG) {
     s.addText("门槛以上三档，几何法 P90 稳定在 0.18 至 0.19 %FS，U-Net 为 0.36 至 0.40，" +
       "numpy 逐像素为 0.25 至 0.37，置信区间互不重叠。分割 IoU 高不等于读数准：" +
       "U-Net 的指针 IoU 是 0.778，读数误差反而更大，因为几何解算只需要指针的方向，不需要它的完整轮廓。", {
-      x: M + 7.74, y: y0 + 3.30, w: 4.42, h: 1.22, fontFace: FT, fontSize: 8.8,
+      x: M + 7.74, y: y0 + 3.30, w: 4.42, h: 1.22, fontFace: F, fontSize: 8.8,
       color: C.navy, isTextBox: true, margin: 0, valign: "top", lineSpacing: 12 });
 
     T.card(s, M, y0 + 4.70, W - M * 2, 0.92, C.blueSoft);
@@ -136,9 +124,9 @@ module.exports = function (pres, IMG) {
       "③　圆心、半径、指针角度每一步可追溯，符合任务书对可解释性的要求。" +
       "　保留 U-Net 的理由　它在几何法假设失效的样本上有优势；但合成表盘的圆心、半径与刻度分布严格满足几何法的假设，" +
       "学习法在这里没有可利用的余量，所以本结论只在合成数据上成立，真实表盘的椭圆畸变与遮挡是否构成失效，要等真实表盘误差表才能定，现在不改默认实现。", {
-      x: M + 0.28, y: y0 + 4.70, w: 11.85, h: 0.92, fontFace: FT, fontSize: 9.2,
+      x: M + 0.28, y: y0 + 4.70, w: 11.85, h: 0.92, fontFace: F, fontSize: 9.2,
       color: C.navy, isTextBox: true, margin: 0, valign: "middle", lineSpacing: 12.5 });
-    T.foot(s, "复现：bench_models --only reading --n 200 --json　·　评测划分见 deliverables/乙-分割/artifacts/split.json（val 90 个含针 ROI 中 59 个来自真实图）");
+    T.foot(s, "复现：bench_models --only reading --n 200　·　评测划分：val 90 个含针 ROI 中 59 个来自真实照片");
     s.addNotes("这一页现在能把 L2 的选择讲完整。原来的图只有 24 个样本、画的是中位数，差异被采样噪声盖住，得不出结论；" +
       "现在 n=200、画 P90、加了 bootstrap 置信区间，三条线在门槛以上分得开。要说清两件事：" +
       "第一，灰底两档系统本来就不读数，那里的差异不参与比选；" +
@@ -149,7 +137,7 @@ module.exports = function (pres, IMG) {
   // ============================================================ L3
   {
     const s = T.slide(pres);
-    const y0 = T.head(s, "三.识别层 L3", "3.9　L3 未知异常：为什么是非监督，为什么是全协方差",
+    const y0 = T.head(s, "三.识别层 L3", "3.11　L3 未知异常：为什么是非监督，为什么是全协方差",
       ["PaDiM 全协方差（统计法保留为零权重降级路径）",
       "外观缺陷没有公开标注；异物改变的正是通道间相关性，对角版本看不见"]);
     const rows = [[T.th("指标"), T.th("统计法\n基线·零权重"), T.th("EfficientAD\n简化蒸馏"),
@@ -179,7 +167,7 @@ module.exports = function (pres, IMG) {
       T.card(s, M, y, 7.60, 0.60);
       s.addText(t, { x: M + 0.20, y, w: 2.35, h: 0.60, fontFace: F, fontSize: 9.8,
         bold: true, color: col, isTextBox: true, margin: 0, valign: "middle" });
-      s.addText(d, { x: M + 2.66, y, w: 4.80, h: 0.60, fontFace: FT, fontSize: 8.6,
+      s.addText(d, { x: M + 2.66, y, w: 4.80, h: 0.60, fontFace: F, fontSize: 8.6,
         color: C.muted, isTextBox: true, margin: 0, valign: "middle", lineSpacing: 11.5 });
     });
 
@@ -188,17 +176,17 @@ module.exports = function (pres, IMG) {
     s.addText("1　训练裁片必须模拟运行时的检测框噪声。实测裁掉 12 % 的正常表盘，异常分由 0.5 升到 1.0，全部误报。" +
       "增广集加入抖动框后，系统实测的复核 ROI 回到正常分 0.00 至 0.09。\n\n" +
       "2　L3 与 L2 分工清晰：开位开关被 L2 判为状态异常，L3 对其外观给正常分；外观异常才由 L3 负责。", {
-      x: M + 8.02, y: y0 + 3.62, w: 4.14, h: 1.48, fontFace: FT, fontSize: 8.8,
+      x: M + 8.02, y: y0 + 3.62, w: 4.14, h: 1.48, fontFace: F, fontSize: 8.8,
       color: C.navy, isTextBox: true, margin: 0, valign: "top", lineSpacing: 12 });
-    T.foot(s, "评测条件：训练 796 张正常裁片，评测 106 正常 + 120 异常，阈值统一 0.55；EfficientAD 失败原因一并记录在案");
+    T.foot(s, "评测条件：训练 796 张正常裁片，评测 106 正常 + 120 异常，四方案阈值统一取 0.55");
     s.addNotes("L3 这一路完成度最高。四个方案在同一批样本同一阈值下比较，结论明确。要强调 EfficientAD 那一列失败了我们照实写进表里；权重大小与打分耗时两行对应成本与实时性，可解释一行对应任务书的伦理要求。");
   }
 
   // ============================================================ 比选汇总
   {
     const s = T.slide(pres);
-    const y0 = T.head(s, "三.方案比选", "3.10　方案比选汇总：技术与非技术因素的权衡",
-      "任务书明确「不直接指定具体技术方案，要求学生调研并比选后确定」，非技术因素为安全、成本、可靠性、伦理与社会责任");
+    const y0 = T.head(s, "三.方案比选", "3.12　方案比选汇总：技术与非技术因素的权衡",
+      "非技术因素按任务书列出的四项计：安全、成本、可靠性、伦理与社会责任");
     const rows = [[T.th("环节"), T.th("候选方案"), T.th("技术权衡"), T.th("非技术因素权衡"), T.th("结论")]];
     [["L1 检测", "① 合成检测器\n② YOLO11 公开集训练", "① 零成本可离线复现但纹理单一\n② 纹理多样但需 GPU 工时",
       "成本：② 需注册账号与显卡；可靠性：① 上真机必然退化", "采用 ②，① 保留为无权重时的降级路径"],
@@ -218,18 +206,18 @@ module.exports = function (pres, IMG) {
     T.table(s, rows, { x: M, y: y0, w: W - M * 2, colW: [1.15, 2.30, 2.65, 3.35, 3.04], rowH: 0.76 });
 
     T.card(s, M, y0 + 4.74, W - M * 2, 0.62, C.navy);
-    s.addText("五个环节均比选 ≥ 2 种方案，权衡依据同时包含技术指标与成本、可靠性、可解释性、安全四项非技术因素；" +
-      "其中 L3 的 EfficientAD 与 L2 的 U-Net 属于「比选后不采用」，原因与实测数据一并记录，未做删除处理。", {
-      x: M + 0.28, y: y0 + 4.74, w: 11.85, h: 0.62, fontFace: FT, fontSize: 9.8,
+    s.addText("表里有两行的结论是「不采用」：L3 的 EfficientAD 复现后分数倒挂，L2 的 U-Net 读数误差反而更大。" +
+      "这两条连同实测数据一起留在表里没有删——排除掉一个方案同样是比选的结果，而且它解释了为什么最后选的是另一个。", {
+      x: M + 0.28, y: y0 + 4.74, w: 11.85, h: 0.62, fontFace: F, fontSize: 9.8,
       color: "DCE9F5", isTextBox: true, margin: 0, valign: "middle", lineSpacing: 13 });
-    T.foot(s, "各环节的完整实测数据见 3.7 至 3.9；比选记录同步保存在 deliverables/ 各交付目录中");
+    T.foot(s);
     s.addNotes("这一页是针对评分表 M2「方案比选 ≥ 2 种且权衡依据充分，含成本可靠性等非技术因素」直接准备的。五个环节都比选了两种以上，每一行的第四列专门写非技术因素。要强调「比选后不采用」也是结论，我们把失败的方案连同数据一起保留。");
   }
 
   // ============================================================ 安全边界
   {
     const s = T.slide(pres);
-    const y0 = T.head(s, "三.安全边界", "3.11　安全边界：三层防线，每一层都能当场演示",
+    const y0 = T.head(s, "三.安全边界", "3.13　安全边界：三层防线，每一层都能当场演示",
       ["参数硬限写进源码、心跳看门狗、安全事件抢占三层",
       "参数放配置文件里可被改，安全边界不应该；边界要在代码结构上成立，不靠自觉"]);
     T.card(s, M, y0, W - M * 2, 0.72, C.navy);
@@ -254,7 +242,7 @@ module.exports = function (pres, IMG) {
       s.addShape("rect", { x: M, y, w: 0.08, h: 1.10, fill: { color: col }, line: { color: col, width: 0 } });
       s.addText(t, { x: M + 0.26, y: y + 0.08, w: 5.5, h: 0.30, fontFace: F, fontSize: 12,
         bold: true, color: C.text, isTextBox: true, margin: 0, valign: "middle" });
-      s.addText(d, { x: M + 0.26, y: y + 0.38, w: 5.6, h: 0.66, fontFace: FT, fontSize: 9,
+      s.addText(d, { x: M + 0.26, y: y + 0.38, w: 5.6, h: 0.66, fontFace: F, fontSize: 9,
         color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 12 });
       T.card(s, M + 6.10, y + 0.12, 6.28, 0.38, C.blueSoft);
       s.addText(cmd, { x: M + 6.24, y: y + 0.12, w: 6.0, h: 0.38, fontFace: "Courier New",
@@ -266,14 +254,14 @@ module.exports = function (pres, IMG) {
     s.addText("所有指向底盘与云台的动作只经过 gateway 一个出口。这是任务书那条约束在代码结构上的保证，不依赖各模块自觉遵守。", {
       x: M + 0.28, y: y0 + 4.52, w: 11.85, h: 0.52, fontFace: F, fontSize: 10.5, bold: true,
       color: C.navy, isTextBox: true, margin: 0, valign: "middle" });
-    T.foot(s, "网关 697 行：收发与审计 / 五项校验 / 参数硬限 / 心跳看门狗；三条演示合计不到一分钟");
+    T.foot(s, "三条演示合计不到一分钟，可在答辩现场依次执行");
     s.addNotes("这一页直接回应任务书的安全要求。三条演示都能当场执行。如果评审对安全设计有疑问，建议直接演示第二条：终止 AI 进程后车辆仍按路线走完，这一条最能说明边界是真的。");
   }
 
   // ============================================================ 控制与闭环
   {
     const s = T.slide(pres);
-    const y0 = T.head(s, "三.控制验证", "3.12　云台伺服：为什么必须做变焦增益调度",
+    const y0 = T.head(s, "三.控制验证", "3.14　云台伺服：为什么必须做变焦增益调度",
       ["PID 控制量按变焦倍率缩放，ω = θ /(W · z) · u",
       "3× 变焦下同样的转角对应三倍画面位移，固定增益等于把回路增益放大三倍"]);
     s.addImage({ path: IMG + "/pid_step.png", x: M, y: y0, w: 6.20, h: 3.79 });
@@ -289,7 +277,7 @@ module.exports = function (pres, IMG) {
     T.card(s, M + 6.42, y0 + 1.72, 5.96, 1.00, C.blueSoft);
     s.addText("为什么必须做增益调度：同样 1° 的云台转角，在 3× 变焦下对应的画面位移是 1× 的三倍。" +
       "控制量若不按倍率缩放，等效于把回路增益放大三倍，必然过冲。本系统按 ω = θ /(W · z) · u 缩放。", {
-      x: M + 6.64, y: y0 + 1.72, w: 5.55, h: 1.00, fontFace: FT, fontSize: 9.5,
+      x: M + 6.64, y: y0 + 1.72, w: 5.55, h: 1.00, fontFace: F, fontSize: 9.5,
       color: C.navy, isTextBox: true, margin: 0, valign: "middle", lineSpacing: 13 });
 
     const st = [["4 + 1", "进程全链路打通", C.green], ["4 – 6", "每轮产出证据包", C.blue],
@@ -316,7 +304,7 @@ module.exports = function (pres, IMG) {
   {
     const s = T.slide(pres);
     const y0 = T.head(s, "四.项目特色", "4.1　项目特色与主要创新点",
-      "四条，每条给出与既有做法的区别、对应的任务书约束以及本阶段的实测支撑");
+      "四条都不是新造的名词，而是既有巡检系统做不到、本课题必须解决的具体问题");
     const N = [
       ["01", "采集参数由判读结果决定的主动复核", C.red,
        "既有巡检系统按固定参数采集。本系统把判读结果反馈回采集环节，按目标当前成像算出所需变焦倍率。",
@@ -342,7 +330,7 @@ module.exports = function (pres, IMG) {
         bold: true, color: col, isTextBox: true, margin: 0, valign: "middle" });
       s.addText(t, { x: M + 0.86, y: y + 0.06, w: 4.90, h: 0.34, fontFace: F, fontSize: 12.5,
         bold: true, color: C.text, isTextBox: true, margin: 0, valign: "middle" });
-      s.addText(d, { x: M + 0.86, y: y + 0.40, w: 4.92, h: 0.62, fontFace: FT, fontSize: 8.8,
+      s.addText(d, { x: M + 0.86, y: y + 0.40, w: 4.92, h: 0.62, fontFace: F, fontSize: 8.8,
         color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 12 });
       T.card(s, M + 5.96, y + 0.10, 2.62, 0.90, C.blueSoft);
       s.addText(link, { x: M + 6.12, y: y + 0.10, w: 2.32, h: 0.90, fontFace: F, fontSize: 9,
@@ -350,10 +338,10 @@ module.exports = function (pres, IMG) {
       T.card(s, M + 8.74, y + 0.10, 3.64, 0.90);
       s.addText("实测支撑", { x: M + 8.92, y: y + 0.16, w: 3.3, h: 0.24, fontFace: F, fontSize: 9,
         bold: true, color: col, isTextBox: true, margin: 0, valign: "middle" });
-      s.addText(ev, { x: M + 8.92, y: y + 0.40, w: 3.32, h: 0.56, fontFace: FT, fontSize: 8.6,
+      s.addText(ev, { x: M + 8.92, y: y + 0.40, w: 3.32, h: 0.56, fontFace: F, fontSize: 8.6,
         color: C.text, isTextBox: true, margin: 0, valign: "top", lineSpacing: 11.5 });
     });
-    T.foot(s, "四条创新点均可在本机复现，对应命令见各研究内容页的页脚");
+    T.foot(s);
     s.addNotes("这一页是答辩重点。四条创新点里第一条是本课题的立论，第二条是控制部分的贡献，第三条是识别部分的贡献，第四条是工程方法上的贡献。中间一列写明每条对应任务书的哪项要求，右侧给实测支撑。");
   }
 
@@ -393,10 +381,10 @@ module.exports = function (pres, IMG) {
       T.card(s, M, y, W - M * 2, 0.60);
       s.addText(t, { x: M + 0.22, y, w: 3.15, h: 0.60, fontFace: F, fontSize: 10,
         bold: true, color: c, isTextBox: true, margin: 0, valign: "middle" });
-      s.addText(d, { x: M + 3.52, y, w: 8.85, h: 0.60, fontFace: FT, fontSize: 9,
+      s.addText(d, { x: M + 3.52, y, w: 8.85, h: 0.60, fontFace: F, fontSize: 9,
         color: C.muted, isTextBox: true, margin: 0, valign: "middle", lineSpacing: 12 });
     });
-    T.foot(s, "状态判定标准：能产出可复现的实测数据才记为已完成；七项已完成、一项进行中、两项未开始");
+    T.foot(s, "状态判定标准：能产出可复现的实测数据才记为已完成");
     s.addNotes("这一页是评审最关心的。状态判定用统一标准：能产出可复现的实测数据才算完成。要主动说两项未开始的原因，其中 ByteTrack 是任务书点名的算法，我们目前用的是 IoU 跟踪，这一条要老实讲。");
   }
 
@@ -434,16 +422,16 @@ module.exports = function (pres, IMG) {
       T.card(s, x, y, 6.05, 1.80);
       s.addText(t, { x: x + 0.22, y: y + 0.06, w: 5.6, h: 0.28, fontFace: F, fontSize: 11,
         bold: true, color: col, isTextBox: true, margin: 0, valign: "middle" });
-      s.addText(items.join("\n"), { x: x + 0.22, y: y + 0.36, w: 5.62, h: 1.36, fontFace: FT,
+      s.addText(items.join("\n"), { x: x + 0.22, y: y + 0.36, w: 5.62, h: 1.36, fontFace: F,
         fontSize: 7.8, color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 11.5 });
     });
     T.card(s, M, y0 + 3.92, W - M * 2, 0.80, C.navy);
     s.addText("综述如何支撑选题与方案：[1][2][5] 支撑巡航期轻量检测的骨干选择；[3][4] 说明云台转动导致跟踪断链的成因，" +
       "并给出下一阶段接入 ByteTrack 的依据；[6][7][8][9] 构成 L3 四方案比选的方法来源，其中 [7] 经实测未采用；" +
       "[10][11][12] 分别支撑分割替换、针孔投影与椭圆拟合三个环节；[15][16] 支撑 RKNN 部署与 INT8 量化的掉点评估；[18] 支撑变焦增益调度的整定方法。", {
-      x: M + 0.28, y: y0 + 3.92, w: 11.85, h: 0.80, fontFace: FT, fontSize: 9,
+      x: M + 0.28, y: y0 + 3.92, w: 11.85, h: 0.80, fontFace: F, fontSize: 9,
       color: "DCE9F5", isTextBox: true, margin: 0, valign: "middle", lineSpacing: 12.5 });
-    T.foot(s, "任务书列出的参考资料五类（RK3576 与 RKNN、YOLO、ByteTrack、EfficientAD 与 PaDiM、机器人安全与 ROS）均已覆盖");
+    T.foot(s);
     s.addNotes("这一页对应评分表的文献支撑项。18 篇分四类，任务书列出的五类参考资料全部覆盖。底部那段是关键：说明每组文献具体支撑方案的哪个环节，而不是简单罗列。其中 EfficientAD 是我们复现后未采用的，这一点也写明了。");
   }
 
@@ -454,13 +442,10 @@ module.exports = function (pres, IMG) {
     s.addImage({ path: TPL + "/cover_photo.jpg", x: 0, y: 0, w: 13.42, h: 6.56 });
     s.addImage({ path: TPL + "/cover_wave.png", x: -0.04, y: 3.39, w: 13.48, h: 4.15 });
     s.addImage({ path: TPL + "/cover_logo.png", x: 0.26, y: 0.25, w: 3.38, h: 0.87 });
-    s.addText("敬请各位老师批评指正", { x: 1.05, y: 4.02, w: 11.23, h: 0.86, align: "center",
+    s.addText("敬请各位老师批评指正", { x: 1.05, y: 4.22, w: 11.23, h: 0.86, align: "center",
       fontFace: F, fontSize: 30, bold: true, color: C.white, isTextBox: true, margin: 0, valign: "middle" });
-    s.addText("现场可演示：变焦对比　·　越界指令被拒　·　AI 进程终止后车辆走完路线　·　复核 200 ms 中止　·　端到端一轮巡检", {
-      x: 1.05, y: 4.92, w: 11.23, h: 0.50, align: "center", fontFace: FT, fontSize: 12,
-      color: "D8E6F2", isTextBox: true, margin: 0, valign: "middle" });
-    s.addText("基于 RK3576 边缘计算的\n无人车主动式 AI 巡检系统设计", { x: 5.30, y: 6.24, w: 2.80, h: 1.00,
-      align: "center", fontFace: FT, fontSize: 10.5, color: C.navy, isTextBox: true,
+        s.addText("基于 RK3576 边缘计算的\n无人车主动式 AI 巡检系统设计", { x: 5.30, y: 6.24, w: 2.80, h: 1.00,
+      align: "center", fontFace: F, fontSize: 10.5, color: C.navy, isTextBox: true,
       margin: 0, valign: "middle", lineSpacing: 15 });
     s.addNotes("结束页。如果时间允许，主动提出现场演示，从五条中选一条，建议选 AI 进程终止后车辆仍走完路线那条。");
   }

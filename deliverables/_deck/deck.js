@@ -1,6 +1,6 @@
 // 中期答辩正文。版式取自学院模板，指标与要求以《测控系统综合实训课题任务书》为准。
 const T = require("./theme");
-const { C, F, FT, W, H, M } = T;
+const { C, F, W, H, M } = T;
 
 module.exports = function (pres, IMG) {
   const TPL = IMG + "/tpl";
@@ -18,10 +18,10 @@ module.exports = function (pres, IMG) {
       x: 0.50, y: 3.90, w: 12.33, h: 0.90, align: "center", fontFace: F, fontSize: 29,
       bold: true, color: C.white, isTextBox: true, margin: 0, valign: "middle" });
     s.addText("测控系统综合实训　·　实训地点 A210　·　指导教师 陈震", {
-      x: 2.40, y: 4.84, w: 8.53, h: 0.56, align: "center", fontFace: FT, fontSize: 14,
+      x: 2.40, y: 4.84, w: 8.53, h: 0.56, align: "center", fontFace: F, fontSize: 14,
       color: "D8E6F2", isTextBox: true, margin: 0, valign: "middle" });
-    s.addText("汇报人：项目组（4 人）\n2026 年 9 月", { x: 5.53, y: 6.30, w: 2.34, h: 0.92,
-      align: "center", fontFace: FT, fontSize: 12, color: C.navy, isTextBox: true,
+    s.addText("汇报人：吴明哲\n2026 年 9 月", { x: 5.53, y: 6.30, w: 2.34, h: 0.92,
+      align: "center", fontFace: F, fontSize: 12, color: C.navy, isTextBox: true,
       margin: 0, valign: "middle", lineSpacing: 18 });
     s.addNotes("开场一句：本课题按任务书要求，基于现有无人车底盘与 RK3576 边缘主机，开发主动式 AI 巡检系统，实现「发现异常、判断图像质量、主动补拍、形成证据、上报复核」的完整闭环。中期阶段的任务是系统搭建、阶段检查与接口联调，本次汇报围绕这三项展开，重点讲我们采用的方案和每一步的选择理由。");
   }
@@ -39,16 +39,19 @@ module.exports = function (pres, IMG) {
       fontFace: F, fontSize: 12.5, bold: true, color: "FFD27F", isTextBox: true, margin: 0, valign: "middle" });
     s.addText("「一套可运行的主动式 AI 巡检系统，实现『发现异常—判断图像质量—主动补拍—" +
       "形成证据—上报复核』的完整闭环，首版可先以单路 1080p RGB 相机和有限缺陷类别达成稳定闭环。」", {
-      x: M + 0.26, y: y0 + 0.50, w: 5.55, h: 0.98, fontFace: FT, fontSize: 10.5,
+      x: M + 0.26, y: y0 + 0.50, w: 5.55, h: 0.98, fontFace: F, fontSize: 10.5,
       color: "DCE9F5", isTextBox: true, margin: 0, valign: "top", lineSpacing: 15 });
 
     T.card(s, M + 6.30, y0, 6.05, 1.62);
     T.cardTitle(s, M + 6.56, y0 + 0.14, 5.5, "任务书列出的八项主要研究内容");
-    s.addText("系统集成　·　RK3576 边缘环境与模型部署　·　目标检测、缺陷识别、未知异常与图像质量评价\n" +
-      "目标跟踪持续锁定　·　主动复核状态机　·　证据包与离线缓存、告警分级、远程上传\n" +
-      "云端人工复核与模型版本管理　·　实时性、识别效果、网络降级与稳定性测试", {
-      x: M + 6.56, y: y0 + 0.50, w: 5.55, h: 0.98, fontFace: FT, fontSize: 10,
-      color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 15 });
+    s.addText("目标检测、已知缺陷识别、未知异常检测和图像质量评价；\n" +
+      "基于目标跟踪的异常目标持续锁定；\n" +
+      "主动复核状态机设计，实现停车、居中、变焦、多角度补拍和恢复巡检路线；\n" +
+      "巡检事件证据包、离线缓存、告警分级和远程上传；\n" +
+      "云端人工复核、模型版本管理和巡检结果闭环；\n" +
+      "系统实时性、识别效果、网络中断降级和运行稳定性测试。", {
+      x: M + 6.56, y: y0 + 0.50, w: 5.55, h: 0.98, fontFace: F, fontSize: 8.6,
+      color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 11.5 });
 
     s.addText("任务书列出的七项相互制约的技术因素，本课题必须在方案设计中明确取舍", {
       x: M, y: y0 + 1.78, w: 12.4, h: 0.32, fontFace: F, fontSize: 13, bold: true,
@@ -71,14 +74,14 @@ module.exports = function (pres, IMG) {
         fontSize: 11, bold: true, color: C.red, isTextBox: true, margin: 0, valign: "middle" });
       s.addText(b, { x: x + 1.60, y: y + 0.10, w: 1.24, h: 0.30, align: "center", fontFace: F,
         fontSize: 11, bold: true, color: C.navy, isTextBox: true, margin: 0, valign: "middle" });
-      s.addText(d, { x: x + 0.16, y: y + 0.46, w: 2.66, h: 0.62, align: "center", fontFace: FT,
+      s.addText(d, { x: x + 0.16, y: y + 0.46, w: 2.66, h: 0.62, align: "center", fontFace: F,
         fontSize: 9.5, color: C.muted, isTextBox: true, margin: 0, valign: "middle", lineSpacing: 13 });
     });
     T.card(s, M + 9.36, y0 + 3.48, 2.96, 1.18, C.blueSoft);
     s.addText("这七项取舍构成本课题的设计空间。\n第三部分的总体方案与逐层选型，都是在这七项之间做的取舍。", {
       x: M + 9.52, y: y0 + 3.48, w: 2.66, h: 1.18, align: "center", fontFace: F, fontSize: 10,
       bold: true, color: C.navy, isTextBox: true, margin: 0, valign: "middle", lineSpacing: 14 });
-    T.foot(s, "本页全部内容引自《测控系统综合实训课题任务书》，未作增补");
+    T.foot(s);
     s.addNotes("本页把任务书的原始要求摆出来。七项相互制约因素是任务书原文，它们构成了本课题的设计空间。要强调：任务书明确写了「不直接指定具体技术方案，要求学生调研并比选后确定方案」，所以后面每一路我们都做了比选，包括比选出「不采用」的情况。");
   }
 
@@ -107,7 +110,7 @@ module.exports = function (pres, IMG) {
     s.addText("现有方案按固定参数采集，再把图像交给后端判读。采集时无法判断这一帧是否够用，" +
       "而判读阶段已经无法补救：表计成像不足时，后端算法读不出所需精度，因为信息在光学环节已经丢失。" +
       "任务书要求的「判断图像质量、主动补拍」正是针对这一点。", {
-      x: M + 0.30, y: y0 + 3.82, w: 11.9, h: 0.60, fontFace: FT, fontSize: 10.5,
+      x: M + 0.30, y: y0 + 3.82, w: 11.9, h: 0.60, fontFace: F, fontSize: 10.5,
       color: "DCE9F5", isTextBox: true, margin: 0, valign: "top", lineSpacing: 15 });
 
     const pos = [["本课题的做法", "把判读结果反馈回采集环节：检出可疑目标后停车、对准、变焦、重新采集，使采集参数由目标本身决定", C.red],
@@ -117,10 +120,10 @@ module.exports = function (pres, IMG) {
       T.card(s, x, y0 + 4.60, 6.05, 0.82);
       s.addText(t, { x: x + 0.24, y: y0 + 4.66, w: 5.6, h: 0.28, fontFace: F, fontSize: 11.5,
         bold: true, color: col, isTextBox: true, margin: 0, valign: "middle" });
-      s.addText(d, { x: x + 0.24, y: y0 + 4.94, w: 5.60, h: 0.44, fontFace: FT, fontSize: 9.8,
+      s.addText(d, { x: x + 0.24, y: y0 + 4.94, w: 5.60, h: 0.44, fontFace: F, fontSize: 9.8,
         color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 13 });
     });
-    T.foot(s, "现状调研为本组自行整理；任务书未指定具体技术方案，明确要求调研并比选后确定");
+    T.foot(s);
     s.addNotes("本页交代现状。三类方案各有适用场景，本课题不是要取代它们，而是补上采集参数可随目标调整这一能力。任务书第一页写明「是否有成熟技术方案：否」「是否需要方案比选：是」，这就是我们逐路做比选的依据。");
   }
 
@@ -151,7 +154,7 @@ module.exports = function (pres, IMG) {
   {
     const s = T.slide(pres);
     const y0 = T.head(s, "二.研究目标", "2.2　研究目标、量化指标与本阶段结果",
-      "任务书规定的是能力要求，量化数值由本组按工业测量惯例自行设定并在此标明");
+      "任务书规定的是能力要求，没有给出数值；下表的量化指标由本组按工业测量惯例设定");
     const rows = [[T.th("任务书要求的能力"), T.th("本组设定的量化指标"), T.th("本阶段实测"), T.th("状态")]];
     const data = [
       ["主动补拍：发现异常后改变采集参数", "复核后成像放大 ≥ 1.5 倍", "像素密度比 1.9 至 2.3", "达成"],
@@ -187,10 +190,10 @@ module.exports = function (pres, IMG) {
       T.card(s, x, y0 + 3.92, 6.05, 1.16);
       s.addText(t, { x: x + 0.24, y: y0 + 4.00, w: 5.6, h: 0.28, fontFace: F, fontSize: 11.5,
         bold: true, color: col, isTextBox: true, margin: 0, valign: "middle" });
-      s.addText(d, { x: x + 0.24, y: y0 + 4.30, w: 5.60, h: 0.72, fontFace: FT, fontSize: 8.8,
+      s.addText(d, { x: x + 0.24, y: y0 + 4.30, w: 5.60, h: 0.72, fontFace: F, fontSize: 8.8,
         color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 12 });
     });
-    T.foot(s, "任务书只规定能力要求，未给出数值指标，表中数值为本组设定；实测值取自虚拟试验台，桩按真机故障率注入，世界模型的真值不提供给感知侧，不存在拿真值核对真值");
+    T.foot(s, "表中数值为本组按工业测量惯例设定；实测值取自虚拟试验台，桩按真机故障率注入，真值不提供给感知侧");
     s.addNotes("这一页要讲清一件事：任务书规定的是能力要求，没有给出 0.5 % FS 这类数值。表中的量化指标是我们按工业测量惯例自行设定的，这一点在页脚写明了。八项中七项达成，重复性 0.321 % FS 超出我们自己设的 0.3 % 限值，主动写在这里。");
   }
 
@@ -209,7 +212,7 @@ module.exports = function (pres, IMG) {
     s.addText("车辆以 30 Hz 巡航，只用轻量检测模型做普查；一旦检出可疑目标，向车辆控制层下发「暂停巡检」「移动至观察点」" +
       "「云台转向 / 变焦」等高层指令，把目标成像放大到可测量的尺度后再判读，得出结论后下发「恢复路线」继续巡检。" +
       "一句话概括：采集参数由判读结果决定，而不是事先固定。", {
-      x: M + 0.28, y: y0 + 0.42, w: 11.85, h: 0.56, fontFace: FT, fontSize: 10.5,
+      x: M + 0.28, y: y0 + 0.42, w: 11.85, h: 0.56, fontFace: F, fontSize: 10.5,
       color: "DCE9F5", isTextBox: true, margin: 0, valign: "top", lineSpacing: 15 });
 
     const P = [
@@ -240,10 +243,10 @@ module.exports = function (pres, IMG) {
         fontFace: F, fontSize: 9.5, bold: true, color: C.white, isTextBox: true, margin: 0 });
       s.addText(t, { x: x + 0.22, y: y0 + 1.62, w: 3.62, h: 0.32, fontFace: F, fontSize: 12.5,
         bold: true, color: C.text, isTextBox: true, margin: 0, valign: "middle" });
-      s.addText("做法　" + how, { x: x + 0.22, y: y0 + 1.96, w: 3.62, h: 0.52, fontFace: FT,
+      s.addText("做法　" + how, { x: x + 0.22, y: y0 + 1.96, w: 3.62, h: 0.52, fontFace: F,
         fontSize: 8.6, color: C.text, isTextBox: true, margin: 0, valign: "top", lineSpacing: 11.5 });
       s.addText((tag === "采用" ? "采用理由　" : "否定理由　") + why, {
-        x: x + 0.22, y: y0 + 2.50, w: 3.62, h: 0.76, fontFace: FT, fontSize: 8.6,
+        x: x + 0.22, y: y0 + 2.50, w: 3.62, h: 0.76, fontFace: F, fontSize: 8.6,
         color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 11.5 });
       s.addText(link, { x: x + 0.22, y: y0 + 3.22, w: 3.62, h: 0.24, fontFace: F, fontSize: 8.2,
         bold: true, color: col, isTextBox: true, margin: 0, valign: "middle" });
@@ -255,9 +258,9 @@ module.exports = function (pres, IMG) {
     const Q = [
       ["什么时候该停车复核", "十状态机 + 复核预算 + 三条抑制规则", "3.3",
        "停一次车就少走一段路。必须算得出这一趟还停得起几次，并且不会在同一处反复停车。", C.blue],
-      ["停下来怎么把目标放大到位", "针孔几何前馈 + 变焦增益调度 PID", "3.12",
+      ["停下来怎么把目标放大到位", "针孔几何前馈 + 变焦增益调度 PID", "3.14",
        "变焦后同样的云台转角对应的画面位移成倍放大，固定增益的回路必然过冲，对不准就谈不上放大。", C.red],
-      ["放大之后凭什么下结论", "四类模型分工 + 显式规则仲裁", "3.6、3.10",
+      ["放大之后凭什么下结论", "四类模型分工 + 显式规则仲裁", "3.8、3.12",
        "四个子问题对算力、精度与输出形式的要求互相冲突，只能分路做；而结论必须逐条可追溯，仲裁才用规则不用模型。", C.navy],
     ];
     Q.forEach(([t, how, ref, why, col], i) => {
@@ -270,10 +273,10 @@ module.exports = function (pres, IMG) {
         fontSize: 9, bold: true, color: col, isTextBox: true, margin: 0, valign: "middle" });
       s.addText(how, { x: x + 0.24, y: y0 + 4.32, w: 3.62, h: 0.26, fontFace: F, fontSize: 9,
         bold: true, color: col, isTextBox: true, margin: 0, valign: "middle" });
-      s.addText(why, { x: x + 0.24, y: y0 + 4.60, w: 3.62, h: 0.54, fontFace: FT, fontSize: 8.6,
+      s.addText(why, { x: x + 0.24, y: y0 + 4.60, w: 3.62, h: 0.54, fontFace: F, fontSize: 8.6,
         color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 11.5 });
     });
-    T.foot(s, "总体方案的比选依据同样包含非技术因素：方案一的续航与带宽成本、方案二的断网可靠性，均在否定理由中；逐条落到做法见下一页");
+    T.foot(s);
     s.addNotes("这一页是全篇的主线，讲得清楚，后面每一页都有位置放。先用一句话说清方案：采集参数由判读结果决定，不是事先固定。" +
       "再讲为什么另外两种不行——方案一被任务书的三项制约同时否掉，方案二的问题是信息在光学环节就丢了，后端补不回来。" +
       "最后说方案三带来三个子问题，第三部分剩下的十几页就是逐个回答它们。评审问「你们为什么这么做」，答案全在这一页。");
@@ -293,7 +296,7 @@ module.exports = function (pres, IMG) {
      ["AI 不得直接控制转向、\n电机扭矩与制动力",
       "驱动实例集中在网关一个进程，且不加载模型",
       "同进程做不到——一次段错误会同时终止感知与控制两侧",
-      "终止 AI 进程后车辆仍按原路线走完", "3.11"],
+      "终止 AI 进程后车辆仍按原路线走完", "3.13"],
      ["巡检效率 ↔ 证据完整性",
       "复核预算 N_max 加三条抑制规则",
       "停一次车就少走一段路，必须算得出这一趟还停得起几次",
@@ -301,11 +304,11 @@ module.exports = function (pres, IMG) {
      ["图像分辨率 ↔ 传输带宽\n本地处理 ↔ 云端分析",
       "判读放在边缘，高清数据只在复核瞬间产生",
       "全程高清回传超出带宽；判读靠云端则断网即失效",
-      "断网可缓存，恢复后断点续传与指数退避", "3.4"],
+      "断网可缓存，恢复后断点续传与指数退避", "3.5"],
      ["伦理与社会责任：\nAI 误判与可解释性",
       "四路模型的结论交纯规则的 L4 仲裁",
       "每条结论附 reasons 字段可逐级追溯，模型给不出这种依据",
-      "六种结论各有测试用例", "3.6"],
+      "六种结论各有测试用例", "3.8"],
      ["各模块接口对接\n与进度同步",
       "五份 Schema 编码前冻结 + 51 项校验",
       "四人并行开发，联调时字段必须对得上，不能边写边改",
@@ -319,11 +322,11 @@ module.exports = function (pres, IMG) {
     T.table(s, rows, { x: M, y: y0, w: W - M * 2, colW: [2.45, 2.55, 3.75, 2.74, 1.00], rowH: 0.62 });
 
     T.card(s, M, y0 + 4.62, W - M * 2, 0.64, C.navy);
-    s.addText("这六条合起来就是本课题的技术方案。左边一列一个字没加，全是任务书原文；右边一列每一条都能当场跑给评审看；" +
-      "中间一列是答辩要讲的部分——同一条约束下本来有别的解法，我们为什么落到了这一个。", {
-      x: M + 0.28, y: y0 + 4.62, w: 11.85, h: 0.64, fontFace: FT, fontSize: 10,
+    s.addText("同一条约束下本来都有别的解法：算力紧张可以换更小的模型而不分两段，安全边界可以靠约定而不靠进程隔离，" +
+      "接口可以边写边改而不先冻结。这六行记的就是我们为什么没走那些路。", {
+      x: M + 0.28, y: y0 + 4.62, w: 11.85, h: 0.64, fontFace: F, fontSize: 10,
       color: "DCE9F5", isTextBox: true, margin: 0, valign: "middle", lineSpacing: 13.5 });
-    T.foot(s, "本页是第三部分的索引：后面每一页展开其中一行，页码见最右列");
+    T.foot(s);
     s.addNotes("这一页是给评审看的索引，也是我们自己讲述的骨架。表格从左到右读就是一条完整的推理：" +
       "任务书给了什么约束、我们据此做了什么、为什么这么做、以及用什么办法证明它成立。" +
       "如果评审只想听一页，讲这一页；如果要追某一条，按最右列翻到对应页展开。" +
@@ -354,12 +357,12 @@ module.exports = function (pres, IMG) {
       s.addText(n, { x, y: y0, w: bw, h: 0.32, align: "center", valign: "middle",
         fontFace: F, fontSize: 9.5, bold: true, color: C.white, isTextBox: true, margin: 0 });
       s.addText(d, { x: x + 0.08, y: y0 + 0.40, w: bw - 0.16, h: 1.44, align: "center",
-        fontFace: FT, fontSize: 9.5, color: C.text, isTextBox: true, margin: 0, valign: "middle", lineSpacing: 14 });
+        fontFace: F, fontSize: 9.5, color: C.text, isTextBox: true, margin: 0, valign: "middle", lineSpacing: 14 });
       if (i < steps.length - 1) s.addText("›", { x: x + bw - 0.02, y: y0 + 0.70, w: 0.14, h: 0.5,
         align: "center", fontFace: F, fontSize: 14, bold: true, color: C.muted, isTextBox: true, margin: 0, valign: "middle" });
     });
     s.addText("另有 ABORT 与 ERROR 两个状态，合计十个。每个状态都定义了超时转移，不存在没有出边的状态。", {
-      x: M, y: y0 + 2.02, w: 12.4, h: 0.28, fontFace: FT, fontSize: 10,
+      x: M, y: y0 + 2.02, w: 12.4, h: 0.28, fontFace: F, fontSize: 10,
       color: C.muted, isTextBox: true, margin: 0, valign: "middle" });
 
     const notes = [
@@ -381,10 +384,10 @@ module.exports = function (pres, IMG) {
         bold: true, color: col, isTextBox: true, margin: 0, valign: "middle", lineSpacing: 14 });
       s.addText(f, { x: x + 0.24, y: y0 + 3.10, w: 3.6, h: 0.30, fontFace: F, fontSize: 10,
         bold: true, color: C.blue, isTextBox: true, margin: 0, valign: "middle" });
-      s.addText(d, { x: x + 0.24, y: y0 + 3.44, w: 3.60, h: 1.36, fontFace: FT, fontSize: 9,
+      s.addText(d, { x: x + 0.24, y: y0 + 3.44, w: 3.60, h: 1.36, fontFace: F, fontSize: 9,
         color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 12.5 });
     });
-    T.foot(s, "实现：patrol/mission/fsm.py 598 行十状态　·　suppress.py 三条抑制　·　budget.py 预算与顺延队列");
+    T.foot(s, "实现：mission/fsm.py 十状态　·　suppress.py 三条抑制　·　budget.py 预算与顺延队列");
     s.addNotes("十状态机对应任务书研究内容第 5 项。三条补充说明各自对应任务书的一项要求：复核预算对应巡检效率与证据完整性的取舍，安全事件抢占对应急停避障优先级高于巡检任务。");
   }
 
@@ -405,9 +408,9 @@ module.exports = function (pres, IMG) {
       T.card(s, x, y0, 2.98, 1.72);
       s.addText(n, { x: x + 0.20, y: y0 + 0.14, w: 2.6, h: 0.32, fontFace: F, fontSize: 12.5,
         bold: true, color: col, isTextBox: true, margin: 0, valign: "middle" });
-      s.addText("拥有　" + own, { x: x + 0.20, y: y0 + 0.52, w: 2.60, h: 0.48, fontFace: FT,
+      s.addText("拥有　" + own, { x: x + 0.20, y: y0 + 0.52, w: 2.60, h: 0.48, fontFace: F,
         fontSize: 9.5, color: C.text, isTextBox: true, margin: 0, valign: "top", lineSpacing: 13 });
-      s.addText("绝不碰　" + never, { x: x + 0.20, y: y0 + 1.02, w: 2.60, h: 0.58, fontFace: FT,
+      s.addText("绝不碰　" + never, { x: x + 0.20, y: y0 + 1.02, w: 2.60, h: 0.58, fontFace: F,
         fontSize: 9.5, color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 13 });
     });
     const ifs = [["IF-1", "DetectionEvent", "感知 → 任务 / 上传", "PUB/SUB", "10 Hz + 按需"],
@@ -427,7 +430,7 @@ module.exports = function (pres, IMG) {
     s.addText("任务书要求 AI 模块只能发送高层指令，不得直接控制底层执行机构。" +
       "把对执行器的访问集中到唯一进程，并让该进程不加载任何模型，" +
       "才能在感知或任务进程异常退出后继续工作。放在同一进程内做不到：一次段错误会同时终止两侧。", {
-      x: M + 7.76, y: y0 + 2.40, w: 4.40, h: 1.22, fontFace: FT, fontSize: 10,
+      x: M + 7.76, y: y0 + 2.40, w: 4.40, h: 1.22, fontFace: F, fontSize: 10,
       color: "DCE9F5", isTextBox: true, margin: 0, valign: "top", lineSpacing: 14 });
 
     const sch = [["五份 Schema 全部 additionalProperties: false", "detection_event / control_command / command_ack / status_report / evidence_package"],
@@ -438,17 +441,92 @@ module.exports = function (pres, IMG) {
       T.card(s, M, y, W - M * 2, 0.54);
       s.addText(t, { x: M + 0.24, y, w: 4.30, h: 0.54, fontFace: F, fontSize: 10.5,
         bold: true, color: C.navy, isTextBox: true, margin: 0, valign: "middle" });
-      s.addText(d, { x: M + 4.66, y, w: 7.70, h: 0.54, fontFace: FT, fontSize: 9.5,
+      s.addText(d, { x: M + 4.66, y, w: 7.70, h: 0.54, fontFace: F, fontSize: 9.5,
         color: C.muted, isTextBox: true, margin: 0, valign: "middle" });
     });
-    T.foot(s, "接口契约冻结于开题评审；证据目录 <run_id>/<event_id>/ 的结构本身也是契约的一部分，两个进程读写同一目录属契约内用法，不必新开第五条总线接口");
+    T.foot(s);
     s.addNotes("四个进程的边界按安全职责划分，不按代码量划分。右上那段是回答「为什么这么复杂」的：任务书要求 AI 只能发高层指令，要真正做到就必须让网关独立成进程且不加载模型。五份 Schema 是冻结的接口契约，配 51 项校验保证开发过程中不被改动。");
+  }
+
+  // ============================================================ 数据流
+  {
+    const s = T.slide(pres);
+    const y0 = T.head(s, "三.实施路径", "3.5　这套结构怎么跑起来：一次复核的十二步数据流",
+      ["证据目录作为第五条隐式接口，不新增总线报文",
+      "五份 Schema 已冻结不容新增字段，而目录结构本身就是契约的一部分"]);
+    const rows = [[T.th("#"), T.th("进程"), T.th("动作"), T.th("代码位置")]];
+    [["1", "perception", "30 Hz 巡航，L1 检出一块表，置信度落在 0.25 至 0.60 的可疑带内", "node.py::process_frame"],
+     ["2", "perception", "铸 event_id（仅在车辆运动且变焦处于广角端时），发 IF-1，is_suspect=true", "node.py，new_uuid()"],
+     ["3", "mission", "连续三帧同一 track_id 才确认，再查三条抑制规则与复核预算", "fsm.py::_st_cruise"],
+     ["4", "mission", "下发「暂停巡检」，网关执行五项校验后底盘停车", "fsm.py → gateway/checks.py"],
+     ["5", "mission", "针孔几何算 aim_offset 做前馈粗对准，再用 PID 闭合像素残差", "fsm.py::_st_aim、servo.py"],
+     ["6", "mission", "按 zoom_for_density 算出使成像达标所需的倍率并下发「云台变焦」", "scene/optics.py"],
+     ["7", "perception", "从 IF-3 的状态组合识别出正在复核，运行四路模型并做融合", "node.py::verify_due → fusion.py"],
+     ["8", "perception", "融合结论与四路各自输出写入 fusion.json", "node.py::_dump_fusion"],
+     ["9", "mission", "状态机过程与各状态耗时写入 mission_ctx.json", "node.py::_dump_ctx"],
+     ["10", "uploader", "配对 before 与 after，合并两个 sidecar，生成 manifest.json", "packer.py"],
+     ["11", "uploader", "先传元数据再传文件，支持断点续传与指数退避", "transport.py"],
+     ["12", "cloud", "入库、台账展示、人工复核裁决、模型版本登记", "cloud/db.py、server.py"],
+    ].forEach(r => rows.push([
+      T.td(r[0], { align: "center", bold: true, color: C.red, fontSize: 9 }),
+      T.td(r[1], { fontSize: 9, bold: true, color: C.blue }),
+      T.td(r[2], { fontSize: 9 }), T.td(r[3], { fontSize: 8.5, color: C.muted })]));
+    T.table(s, rows, { x: M, y: y0, w: W - M * 2, colW: [0.42, 1.40, 7.55, 3.12], rowH: 0.295 });
+
+    T.card(s, M, y0 + 4.10, W - M * 2, 0.86, C.blueSoft);
+    s.addText("第 8、9 步为什么落文件而不走总线：IF-1 的 Schema 不允许新增字段，OCR 原文与状态机过程放不进去；" +
+      "而证据目录的结构本身就是接口契约的一部分，两个进程读写同一个 <run_id>/<event_id>/ 目录属于契约内用法，不必新开第五条接口。", {
+      x: M + 0.28, y: y0 + 4.10, w: 11.85, h: 0.86, fontFace: F, fontSize: 10,
+      color: C.navy, isTextBox: true, margin: 0, valign: "middle", lineSpacing: 14 });
+    T.foot(s);
+    s.addNotes("这一页给评审看系统到底怎么运转。十二步跨四个进程与云端，每步都能指到具体文件。第 4 步和第 6 步下发的正是任务书列出的高层指令：暂停巡检、云台变焦。");
+  }
+
+  // ============================================================ 虚拟试验台
+  {
+    const s = T.slide(pres);
+    const y0 = T.head(s, "三.研究方法", "3.6　硬件没到怎么验证：虚拟试验台与故障注入",
+      ["驱动抽象 + 注入真机故障率的桩，而不是空实现",
+      "桩若把目标值直接赋给状态量，任何到位判据都会通过，验证就没有意义"]);
+    s.addImage({ path: IMG + "/thirdperson_compare.png", x: M, y: y0, w: 7.30, h: 2.05 });
+    s.addText("第三人称机位同时画出车身、云台朝向与当前视锥。变焦 1× 到 3× 时视场角由 60.0° 收窄到 21.8°，" +
+      "视锥落在被复核的表盘上。指令下发、云台转动、视场覆盖目标这一串过程因此可以直接观察。", {
+      x: M, y: y0 + 2.12, w: 7.30, h: 0.56, fontFace: F, fontSize: 9.5,
+      color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 13 });
+
+    const pts = [
+      ["桩不是空实现", "注入真机上实际存在的故障：ACK 丢包 2 %、对焦失败 5 %、云台角速度上限、安全事件 0.05 次/分。若驱动只把目标值直接赋给状态量，任何到位判据都会通过，验证便失去意义。", C.red],
+      ["真值与先验严格分开", "世界模型中的 truth 只提供给渲染器与评分逻辑，感知侧读不到。否则精度指标等于用真值核对真值。这条约束是评测结果可信的前提。", C.navy],
+      ["串口链路已由假小车验证", "fakecar 以独立进程运行，字节经过内核（POSIX 用 PTY，Windows 用 TCP 环回）。分帧、CRC、超时、重传与丢包注入均按原样发生。", C.green],
+      ["硬件到位只改两处", "configs/system.yaml 的 driver_mode 由 stub 改为 real，configs/real.yaml 填端口与限位。上位机代码不动。", C.blue],
+    ];
+    pts.forEach(([t, d, col], i) => {
+      const y = y0 + i * 1.20;
+      T.card(s, M + 7.52, y, 4.86, 1.10);
+      s.addText(t, { x: M + 7.74, y: y + 0.08, w: 4.4, h: 0.28, fontFace: F, fontSize: 11,
+        bold: true, color: col, isTextBox: true, margin: 0, valign: "middle" });
+      s.addText(d, { x: M + 7.74, y: y + 0.36, w: 4.42, h: 0.68, fontFace: F, fontSize: 8.8,
+        color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 12 });
+    });
+    const gates = [["接口一致性校验　51 项", "python -m patrol.tools.validate"],
+                   ["自动化测试　501 项，覆盖率 75 %", "python -m pytest -q"],
+                   ["端到端实跑　300 s 一轮", "python -m patrol.tools.run_all --seconds 300"]];
+    gates.forEach(([t, cmd], i) => {
+      const y = y0 + 2.86 + i * 0.62;
+      T.card(s, M, y, 7.30, 0.54);
+      s.addText(t, { x: M + 0.22, y, w: 3.30, h: 0.54, fontFace: F, fontSize: 10.5,
+        bold: true, color: C.navy, isTextBox: true, margin: 0, valign: "middle" });
+      s.addText(cmd, { x: M + 3.58, y, w: 3.60, h: 0.54, fontFace: "Courier New", fontSize: 8.5,
+        color: C.blue, isTextBox: true, margin: 0, valign: "middle" });
+    });
+    T.foot(s);
+    s.addNotes("这一页回答没有硬件如何开展工作。两点要强调：桩会注入真机上实际存在的故障，所以在桩上通过的验收有意义；真值与先验严格分开，精度数据不是自我核对得出的。左下三项检查每次提交前都跑。");
   }
 
   // ============================================================ 资料来源
   {
     const s = T.slide(pres);
-    const y0 = T.head(s, "三.资料来源", "3.5　数据从哪来：公开数据训纹理，合成数据补结构",
+    const y0 = T.head(s, "三.资料来源", "3.7　数据从哪来：公开数据训纹理，合成数据补结构",
       ["权重从公开数据集训练，合成数据只做增广",
       "合成图的纹理、光照与背景比不了真实照片；它能补的是密度分层与配对样本"]);
     const rows = [[T.th("来源"), T.th("规模"), T.th("许可"), T.th("用途"), T.th("获取与处理方式")]];
@@ -480,10 +558,10 @@ module.exports = function (pres, IMG) {
       s.addShape("rect", { x, y, w: 0.07, h: 1.30, fill: { color: col }, line: { color: col, width: 0 } });
       s.addText(t, { x: x + 0.24, y: y + 0.08, w: 3.62, h: 0.34, fontFace: F, fontSize: 10.5,
         bold: true, color: col, isTextBox: true, margin: 0, valign: "middle" });
-      s.addText(d, { x: x + 0.24, y: y + 0.44, w: 3.62, h: 0.78, fontFace: FT, fontSize: 8.6,
+      s.addText(d, { x: x + 0.24, y: y + 0.44, w: 3.62, h: 0.78, fontFace: F, fontSize: 8.6,
         color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 11.5 });
     });
-    T.foot(s, "任务书未指定数据集，仅点名可用工具（YOLO 系列、MobileNet、EfficientAD 或 PaDiM、ByteTrack、OpenCV）");
+    T.foot(s, "任务书未指定数据集，仅点名可用工具：YOLO 系列、MobileNet、EfficientAD 或 PaDiM、ByteTrack、OpenCV");
     s.addNotes("本页回答资料从何获取。分工要讲清楚：公开数据集是训练主力，合成数据只补三样结构性的东西。指针 IoU 从 0.251 到 0.384 是实证——同一模型只加真实标注就提高 53 %，说明瓶颈在数据不在模型容量。");
   }
 };
