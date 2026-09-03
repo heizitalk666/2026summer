@@ -55,13 +55,13 @@ function head(s, sec, title, sub) {
     // sub 传数组 [采用什么, 为什么] 时排成「决定行」：绿色的结论在前，理由跟在后面。
     // 第三部分每一页都用这种写法，翻到哪一页，先看到的都是选了什么、为什么选它。
     const body = Array.isArray(sub) ? [
-      { text: "采用　", options: { bold: true, color: C.green, fontSize: 11 } },
-      { text: sub[0], options: { bold: true, color: C.green, fontSize: 11.5 } },
-      { text: "　　理由　", options: { bold: true, color: C.muted, fontSize: 11 } },
-      { text: sub[1], options: { color: C.muted, fontSize: 11 } },
+      { text: "采用　", options: { bold: true, color: C.green, fontSize: 11.5 } },
+      { text: sub[0], options: { bold: true, color: C.green, fontSize: 12 } },
+      { text: "　　理由　", options: { bold: true, color: C.muted, fontSize: 11.5 } },
+      { text: sub[1], options: { color: C.muted, fontSize: 11.5 } },
     ] : sub;
     s.addText(body, { x: M, y: BODY_TOP - 0.02, w: W - M * 2, h: 0.32,
-      fontFace: F, fontSize: 11.5, color: C.muted, isTextBox: true, margin: 0, valign: "middle" });
+      fontFace: F, fontSize: 12, color: C.muted, isTextBox: true, margin: 0, valign: "middle" });
     return BODY_TOP + 0.38;
   }
   return BODY_TOP + 0.04;
@@ -70,9 +70,9 @@ function head(s, sec, title, sub) {
 /** 页脚：左侧说明 + 右侧页码（贴在底条之上） */
 function foot(s, note) {
   if (note) s.addText(note, { x: M, y: H - 0.44, w: W - M * 2 - 0.9, h: 0.26,
-    fontFace: F, fontSize: 8.8, color: C.muted, isTextBox: true, margin: 0, valign: "middle" });
+    fontFace: F, fontSize: 9.8, color: C.muted, isTextBox: true, margin: 0, valign: "middle" });
   s.addText(String(PAGE), { x: W - M - 0.62, y: H - 0.44, w: 0.6, h: 0.26, align: "right",
-    fontFace: F, fontSize: 9.5, color: C.muted, isTextBox: true, margin: 0, valign: "middle" });
+    fontFace: F, fontSize: 10.2, color: C.muted, isTextBox: true, margin: 0, valign: "middle" });
 }
 
 /** 目录页 / 分节页：模板的样式是左图右列表，当前节高亮 */
@@ -114,55 +114,24 @@ function card(s, x, y, w, h, fill) {
 function stat(s, x, y, w, value, label, color) {
   s.addText(value, { x, y, w, h: 0.54, fontFace: F, fontSize: 28, bold: true,
     color: color || C.navy, isTextBox: true, margin: 0, valign: "bottom" });
-  s.addText(label, { x, y: y + 0.56, w, h: 0.30, fontFace: F, fontSize: 10.5,
+  s.addText(label, { x, y: y + 0.56, w, h: 0.30, fontFace: F, fontSize: 11.2,
     color: C.muted, isTextBox: true, margin: 0, valign: "top" });
 }
 function cardTitle(s, x, y, w, text, color) {
-  s.addText(text, { x, y, w, h: 0.30, fontFace: F, fontSize: 13, bold: true,
+  s.addText(text, { x, y, w, h: 0.30, fontFace: F, fontSize: 13.5, bold: true,
     color: color || C.navy, isTextBox: true, margin: 0, valign: "middle" });
 }
 function table(s, rows, opts) {
   s.addTable(rows, Object.assign({
-    fontFace: F, fontSize: 10.5, color: C.text,
+    fontFace: F, fontSize: 11.2, color: C.text,
     border: { type: "solid", color: C.cardEdge, pt: 0.75 },
     align: "left", valign: "middle", autoPage: false }, opts));
 }
 function th(text) {
   return { text, options: { bold: true, color: C.white, fill: { color: C.navy },
-    fontSize: 10.5, align: "center" } };
+    fontSize: 11.2, align: "center" } };
 }
-function td(text, o) { return { text, options: Object.assign({ fontSize: 10 }, o || {}) }; }
-
-/** 待补齐槽位 */
-function slot(s, x, y, w, h, title, items, when) {
-  const TH = 0.30, WH = 0.26, PAD = 0.10;      // 标题 / 落款 / 上下留白
-  s.addShape("roundRect", { x, y, w, h, rectRadius: 0.05,
-    fill: { color: C.amberSoft }, line: { color: C.amber, width: 1.5, dashType: "dash" } });
-  if (h < TH + WH + PAD * 2 + 0.24) {
-    // 扁槽位：标题与落款并排占一行，条目占第二行
-    if (h < 0.72) throw new Error("slot 高度不足：扁排版也至少需要 0.72");
-    s.addText(title, { x: x + 0.24, y: y + 0.06, w: w * 0.48, h: TH, fontFace: F,
-      fontSize: 11.5, bold: true, color: "8A5200", isTextBox: true, margin: 0, valign: "middle" });
-    s.addText(when, { x: x + w * 0.50, y: y + 0.06, w: w * 0.50 - 0.24, h: TH, align: "right",
-      fontFace: F, fontSize: 9.5, bold: true, color: C.amber, isTextBox: true, margin: 0, valign: "middle" });
-    s.addText(items.map((t, i) => ({ text: t,
-      options: { bullet: true, breakLine: i !== items.length - 1 } })), {
-      x: x + 0.24, y: y + 0.06 + TH, w: w - 0.50, h: h - 0.12 - TH,
-      fontFace: F, fontSize: 9.5, color: "70430A", isTextBox: true, margin: 0,
-      lineSpacing: 12.5, valign: "top" });
-    return;
-  }
-  const bodyH = h - TH - WH - PAD * 2;
-  s.addText(title, { x: x + 0.24, y: y + PAD, w: w - 0.48, h: TH, fontFace: F,
-    fontSize: 12, bold: true, color: "8A5200", isTextBox: true, margin: 0, valign: "middle" });
-  s.addText(items.map((t, i) => ({ text: t,
-    options: { bullet: true, breakLine: i !== items.length - 1 } })), {
-    x: x + 0.24, y: y + PAD + TH, w: w - 0.50, h: bodyH,
-    fontFace: F, fontSize: 9.5, color: "70430A", isTextBox: true, margin: 0,
-    paraSpaceAfter: 1, lineSpacing: 12.5, valign: "top" });
-  s.addText(when, { x: x + 0.24, y: y + h - PAD - WH, w: w - 0.50, h: WH, fontFace: F,
-    fontSize: 9.5, bold: true, color: C.amber, isTextBox: true, margin: 0, valign: "middle" });
-}
+function td(text, o) { return { text, options: Object.assign({ fontSize: 10.8 }, o || {}) }; }
 
 module.exports = { C, F, W, H, M, BODY_TOP, BODY_BOT, SECTIONS,
-  setImgDir, slide, pageNow, head, foot, toc, card, stat, cardTitle, table, th, td, slot };
+  setImgDir, slide, pageNow, head, foot, toc, card, stat, cardTitle, table, th, td };
