@@ -26,7 +26,10 @@ const C = {
 };
 C.green = "1E7A46";
 
-const F = "Microsoft YaHei";
+// 按公文惯例分两套字：标题、标签与关键数字用黑体，正文、表格内容与页脚用仿宋。
+// 加粗一律走黑体——仿宋没有粗体字面，加粗会被渲染器合成，笔画糊成一团。
+const F  = "黑体";      // 标题字
+const FT = "仿宋";      // 正文字
 const W = 13.333, H = 7.5;
 const M = 0.42;                      // 模板内容区左右边距
 const BODY_TOP = 1.06;               // 横幅下沿
@@ -55,13 +58,13 @@ function head(s, sec, title, sub) {
     // sub 传数组 [采用什么, 为什么] 时排成「决定行」：绿色的结论在前，理由跟在后面。
     // 第三部分每一页都用这种写法，翻到哪一页，先看到的都是选了什么、为什么选它。
     const body = Array.isArray(sub) ? [
-      { text: "采用　", options: { bold: true, color: C.green, fontSize: 11 } },
-      { text: sub[0], options: { bold: true, color: C.green, fontSize: 11.5 } },
-      { text: "　　理由　", options: { bold: true, color: C.muted, fontSize: 11 } },
-      { text: sub[1], options: { color: C.muted, fontSize: 11 } },
+      { text: "采用　", options: { bold: true, color: C.green, fontSize: 11, fontFace: F } },
+      { text: sub[0], options: { bold: true, color: C.green, fontSize: 11.5, fontFace: F } },
+      { text: "　　理由　", options: { bold: true, color: C.muted, fontSize: 11, fontFace: F } },
+      { text: sub[1], options: { color: C.muted, fontSize: 11, fontFace: FT } },
     ] : sub;
     s.addText(body, { x: M, y: BODY_TOP - 0.02, w: W - M * 2, h: 0.32,
-      fontFace: F, fontSize: 11.5, color: C.muted, isTextBox: true, margin: 0, valign: "middle" });
+      fontFace: FT, fontSize: 11.5, color: C.muted, isTextBox: true, margin: 0, valign: "middle" });
     return BODY_TOP + 0.38;
   }
   return BODY_TOP + 0.04;
@@ -70,9 +73,9 @@ function head(s, sec, title, sub) {
 /** 页脚：左侧说明 + 右侧页码（贴在底条之上） */
 function foot(s, note) {
   if (note) s.addText(note, { x: M, y: H - 0.44, w: W - M * 2 - 0.9, h: 0.26,
-    fontFace: F, fontSize: 8.8, color: C.muted, isTextBox: true, margin: 0, valign: "middle" });
+    fontFace: FT, fontSize: 8.8, color: C.muted, isTextBox: true, margin: 0, valign: "middle" });
   s.addText(String(PAGE), { x: W - M - 0.62, y: H - 0.44, w: 0.6, h: 0.26, align: "right",
-    fontFace: F, fontSize: 9.5, color: C.muted, isTextBox: true, margin: 0, valign: "middle" });
+    fontFace: FT, fontSize: 9.5, color: C.muted, isTextBox: true, margin: 0, valign: "middle" });
 }
 
 /** 目录页 / 分节页：模板的样式是左图右列表，当前节高亮 */
@@ -114,7 +117,7 @@ function card(s, x, y, w, h, fill) {
 function stat(s, x, y, w, value, label, color) {
   s.addText(value, { x, y, w, h: 0.54, fontFace: F, fontSize: 28, bold: true,
     color: color || C.navy, isTextBox: true, margin: 0, valign: "bottom" });
-  s.addText(label, { x, y: y + 0.56, w, h: 0.30, fontFace: F, fontSize: 10.5,
+  s.addText(label, { x, y: y + 0.56, w, h: 0.30, fontFace: FT, fontSize: 10.5,
     color: C.muted, isTextBox: true, margin: 0, valign: "top" });
 }
 function cardTitle(s, x, y, w, text, color) {
@@ -123,15 +126,20 @@ function cardTitle(s, x, y, w, text, color) {
 }
 function table(s, rows, opts) {
   s.addTable(rows, Object.assign({
-    fontFace: F, fontSize: 10.5, color: C.text,
+    fontFace: FT, fontSize: 10.5, color: C.text,
     border: { type: "solid", color: C.cardEdge, pt: 0.75 },
     align: "left", valign: "middle", autoPage: false }, opts));
 }
 function th(text) {
   return { text, options: { bold: true, color: C.white, fill: { color: C.navy },
-    fontSize: 10.5, align: "center" } };
+    fontSize: 10.5, align: "center", fontFace: F } };
 }
-function td(text, o) { return { text, options: Object.assign({ fontSize: 10 }, o || {}) }; }
+function td(text, o) {
+  // 单元格默认继承表格的仿宋；标了 bold 的是行首标签一类，换黑体
+  const opt = Object.assign({ fontSize: 10 }, o || {});
+  if (opt.bold && !opt.fontFace) opt.fontFace = F;
+  return { text, options: opt };
+}
 
 /** 待补齐槽位 */
 function slot(s, x, y, w, h, title, items, when) {
@@ -148,7 +156,7 @@ function slot(s, x, y, w, h, title, items, when) {
     s.addText(items.map((t, i) => ({ text: t,
       options: { bullet: true, breakLine: i !== items.length - 1 } })), {
       x: x + 0.24, y: y + 0.06 + TH, w: w - 0.50, h: h - 0.12 - TH,
-      fontFace: F, fontSize: 9.5, color: "70430A", isTextBox: true, margin: 0,
+      fontFace: FT, fontSize: 9.5, color: "70430A", isTextBox: true, margin: 0,
       lineSpacing: 12.5, valign: "top" });
     return;
   }
@@ -158,11 +166,11 @@ function slot(s, x, y, w, h, title, items, when) {
   s.addText(items.map((t, i) => ({ text: t,
     options: { bullet: true, breakLine: i !== items.length - 1 } })), {
     x: x + 0.24, y: y + PAD + TH, w: w - 0.50, h: bodyH,
-    fontFace: F, fontSize: 9.5, color: "70430A", isTextBox: true, margin: 0,
+    fontFace: FT, fontSize: 9.5, color: "70430A", isTextBox: true, margin: 0,
     paraSpaceAfter: 1, lineSpacing: 12.5, valign: "top" });
   s.addText(when, { x: x + 0.24, y: y + h - PAD - WH, w: w - 0.50, h: WH, fontFace: F,
     fontSize: 9.5, bold: true, color: C.amber, isTextBox: true, margin: 0, valign: "middle" });
 }
 
-module.exports = { C, F, W, H, M, BODY_TOP, BODY_BOT, SECTIONS,
+module.exports = { C, F, FT, W, H, M, BODY_TOP, BODY_BOT, SECTIONS,
   setImgDir, slide, pageNow, head, foot, toc, card, stat, cardTitle, table, th, td, slot };
