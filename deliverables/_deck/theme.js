@@ -52,7 +52,15 @@ function head(s, sec, title, sub) {
     x: 3.15, y: 0.20, w: 7.10, h: 0.50, align: "center", valign: "middle",
     fontFace: F, fontSize: 15.5, bold: true, color: C.navy, isTextBox: true, margin: 0 });
   if (sub) {
-    s.addText(sub, { x: M, y: BODY_TOP - 0.02, w: W - M * 2, h: 0.32,
+    // sub 传数组 [采用什么, 为什么] 时排成「决定行」：绿色的结论在前，理由跟在后面。
+    // 第三部分每一页都用这种写法，翻到哪一页，先看到的都是选了什么、为什么选它。
+    const body = Array.isArray(sub) ? [
+      { text: "采用　", options: { bold: true, color: C.green, fontSize: 11 } },
+      { text: sub[0], options: { bold: true, color: C.green, fontSize: 11.5 } },
+      { text: "　　理由　", options: { bold: true, color: C.muted, fontSize: 11 } },
+      { text: sub[1], options: { color: C.muted, fontSize: 11 } },
+    ] : sub;
+    s.addText(body, { x: M, y: BODY_TOP - 0.02, w: W - M * 2, h: 0.32,
       fontFace: F, fontSize: 11.5, color: C.muted, isTextBox: true, margin: 0, valign: "middle" });
     return BODY_TOP + 0.38;
   }
