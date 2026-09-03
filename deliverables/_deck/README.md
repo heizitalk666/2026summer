@@ -33,13 +33,15 @@ NODE_PATH=$(pwd)/node_modules node make_deck.js   # → deliverables/中期答�
    成品由 63 MB 降到 9 MB。目录页用的是单独裁切的 `toc_photo.jpg`，
    直接拉伸整幅封面图会把 2:1 的照片压成 1:1。
 
-## 明天上午补齐甲、乙
+## 还开着的槽位
 
-两处槽位都在 `deck2.js`，搜 `T.slot(` 就能找到：
+只剩一处，在 `deck2.js` 里搜 `T.slot(` 就能找到：
 
 - **第 16 页** 甲 · L1 待补：复核级 yolo11m 的 mAP50 对比、单帧耗时（≤ 33 ms）、
   漏检率（≤ 2 %）、切换 `detector: yolo` 后的 run_all 三轮对比、`--check-leak` 结果
-- **第 17 页** 乙 · L2 待补：核心比选图 `reading_error.png` 重画（n ≥ 200、纵轴改 P90）
+
+乙 的核心比选图已交（`reading_error.png`，n = 200、P90、bootstrap 95 % CI），
+第 17 页整页重写为「三种方案的实测比选与采用理由」，槽位已撤。
 
 补齐做法：新图放进 `img/`，把对应的 `T.slot(...)` 换成 `T.card(...)` 或 `s.addImage(...)`，
 重跑 `make_deck.js`。页码自动重排，不用改别处。

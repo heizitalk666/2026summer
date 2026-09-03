@@ -24,7 +24,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import time
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -69,17 +71,37 @@ def make_dial(px: int, value: float, *, tilt_ratio: float = 1.0,
     return img, (pad, pad, pad + px, pad + h)
 
 
-def bench_reading(segmenter, *, n=24, seed=0) -> None:
+def _err_stats(errs, times):
+    """一档读数的统计：读出率、误差 P50/P90/P95、耗时。
+
+    P90 而不是中位数才是该看的量——像素密度买到的是"不出大错"，不是"典型
+    误差更小"（见 deliverables/乙-分割/补齐清单.md 第 3.2 节）。
+    """
+    n = len(times)
+    if n == 0:
+        return {"n": 0, "readout": None, "p50": None, "p90": None,
+                "p95": None, "latency_ms": None}
+    e = np.asarray(errs, np.float64)
+    return {
+        "n": n,
+        "readout": float(len(e) / n),              # 读得出的样本占比
+        "p50": float(np.median(e)) if len(e) else None,
+        "p90": float(np.percentile(e, 90)) if len(e) else None,
+        "p95": float(np.percentile(e, 95)) if len(e) else None,
+        "latency_ms": float(np.median(np.asarray(times))),
+    }
+
+
+def bench_reading(segmenter, *, n=24, seed=0, json_path=None) -> dict | None:
     rng = np.random.default_rng(seed)
     span = PRIORS["range_max"] - PRIORS["range_min"]
-    print("\n读数：几何法 vs 分割级联")
-    print("  %-11s %-7s %10s %8s %10s %8s" %
-          ("像素密度", "样本", "几何 %FS", "耗时ms", "级联 %FS", "耗时ms"))
+    seg_name = segmenter.model_info().get("name", "seg") if segmenter else None
+    rows = []
+    print("\n读数：几何法 vs 分割级联（n=%d）" % n)
     for lo, hi in BANDS:
         errs = {"geo": [], "seg": []}
         times = {"geo": [], "seg": []}
-        n_ok = 0
-        for i in range(n):
+        for _ in range(n):
             px = int(rng.integers(lo, hi))
             v = float(rng.uniform(PRIORS["range_min"] + 0.05 * span,
                                   PRIORS["range_max"] - 0.05 * span))
@@ -94,18 +116,50 @@ def bench_reading(segmenter, *, n=24, seed=0) -> None:
                 times[tag].append((time.perf_counter() - t0) * 1000)
                 if r.ok:
                     errs[tag].append(abs(r.value - v) / span * 100.0)
-            n_ok += 1
 
-        def fmt(tag):
-            e, t = errs[tag], times[tag]
-            if not t:
-                return "%10s %8s" % ("—", "—")
-            ev = ("%10.2f" % float(np.median(e))) if e else "%10s" % "读不出"
-            return "%s %8.1f" % (ev, float(np.median(t)))
+        band = {"lo": lo, "hi": hi, "n": n}
+        for tag in ("geo", "seg"):
+            if tag == "seg" and segmenter is None:
+                continue
+            st = _err_stats(errs[tag], times[tag])
+            st["method"] = "geometric" if tag == "geo" else seg_name
+            st["raw_errors"] = errs[tag]
+            band[tag] = st
+        rows.append(band)
 
-        print("  %-11s %-7d %s %s" % ("%d–%d px" % (lo, hi), n_ok,
-                                      fmt("geo"), fmt("seg")))
-    print("  （误差取中位数，%FS = 满量程百分比；判据线 120 px 对应 0.5 %FS 的设计目标）")
+    def _v(x):
+        return "   —" if x is None else "%6.2f" % x
+
+    print("  %-11s %-6s %-14s %6s %7s %7s %7s %7s" %
+          ("像素密度", "样本", "方法", "读出率", "P50", "P90", "P95", "耗时ms"))
+    for b in rows:
+        print("  %-11s %-6d" % ("%d–%d px" % (b["lo"], b["hi"]), b["n"]))
+        for tag, mname in (("geo", "几何"), ("seg", "级联")):
+            if tag not in b:
+                continue
+            s = b[tag]
+            print("  %-11s %-6s %-14s %6s %s %s %s %7.1f" %
+                  ("", "", mname,
+                   ("%.1f%%" % (100 * s["readout"])
+                    if s["readout"] is not None else "   —"),
+                   _v(s["p50"]), _v(s["p90"]), _v(s["p95"]), s["latency_ms"]))
+    print("  （误差 %FS；P90 是各档读得出的样本里误差的第 90 百分位；"
+          "判据线 120 px 对应 0.5 %FS 的设计目标）")
+
+    payload = {
+        "seed": seed, "n": n, "span": span,
+        "seg_name": seg_name,
+        "seg_weights": (segmenter.path if hasattr(segmenter, "path") else None)
+        if segmenter else None,
+        "bands": rows,
+    }
+    if json_path:
+        p = Path(json_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(payload, ensure_ascii=False, indent=2),
+                     encoding="utf-8")
+        print("  结果写到 %s" % p)
+    return payload
 
 
 def bench_ocr(ocr, *, n=12, seed=1) -> None:
@@ -204,6 +258,8 @@ def main(argv=None) -> int:
     ap.add_argument("--seg-weights", default=None,
                     help="分割权重；不给就只跑几何法那一列")
     ap.add_argument("--n", type=int, default=24, help="每档样本数")
+    ap.add_argument("--json", default=None,
+                    help="把读数的原始误差与 P50/P90/P95 写到这个 JSON")
     a = ap.parse_args(argv)
 
     cfg = Config.load(a.config)
@@ -224,7 +280,7 @@ def main(argv=None) -> int:
     ocr = build_ocr(cfg)
 
     if a.only in (None, "reading"):
-        bench_reading(segmenter, n=a.n)
+        bench_reading(segmenter, n=a.n, json_path=a.json)
     if a.only in (None, "ocr"):
         bench_ocr(ocr, n=max(6, a.n // 2))
     if a.only in (None, "latency"):
