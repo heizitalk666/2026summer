@@ -394,64 +394,125 @@ module.exports = function (pres, IMG) {
     s.addNotes("十状态机对应任务书研究内容第 5 项。三条补充说明各自对应任务书的一项要求：复核预算对应巡检效率与证据完整性的取舍，安全事件抢占对应急停避障优先级高于巡检任务。");
   }
 
-  // ============================================================ 系统结构
+  // ============================================================ 系统结构（架构图）
   {
     const s = T.slide(pres);
-    const y0 = T.head(s, "三.系统结构", "3.4　执行器为什么只能有一个出口：四进程、四接口与五份契约",
+    const y0 = T.head(s, "三.系统结构", "3.4　系统架构：四个进程、四条接口与硬件边界",
       ["驱动实例集中在网关一个进程，网关不加载任何模型",
       "放在同一进程里，一次段错误会同时终止感知与控制两侧"]);
-    const procs = [
-      ["perception　感知", "相机、四路识别模型", "不持有驱动实例，收不到指令", C.blue],
-      ["mission　任务", "十状态机、PID、复核预算", "不碰驱动，不加载模型，只发指令", C.blue],
-      ["gateway　安全网关", "四个驱动实例（唯一）", "不加载模型、不处理图像", C.red],
-      ["uploader　上传", "证据目录、上传队列", "不碰驱动，不加载模型", C.blue],
-    ];
-    procs.forEach(([n, own, never, col], i) => {
-      const x = M + i * 3.14;
-      T.card(s, x, y0, 2.98, 1.66);
-      s.addText(n, { x: x + 0.20, y: y0 + 0.14, w: 2.6, h: 0.32, fontFace: F, fontSize: 13,
-        bold: true, color: col, isTextBox: true, margin: 0, valign: "middle" });
-      s.addText("拥有　" + own, { x: x + 0.20, y: y0 + 0.52, w: 2.60, h: 0.48, fontFace: F,
-        fontSize: 10.2, color: C.text, isTextBox: true, margin: 0, valign: "top", lineSpacing: 14.5 });
-      s.addText("绝不碰　" + never, { x: x + 0.20, y: y0 + 1.02, w: 2.60, h: 0.58, fontFace: F,
-        fontSize: 10.2, color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 14.5 });
-    });
-    const ifs = [["IF-1", "DetectionEvent", "感知 → 任务 / 上传", "PUB/SUB", "10 Hz + 按需"],
-                 ["IF-2", "ControlCommand / Ack", "任务 → 网关", "REQ/REP", "事件驱动，5 Hz 心跳"],
-                 ["IF-3", "StatusReport", "网关 → 所有进程", "PUB/SUB", "20 Hz，安全事件插播"],
-                 ["IF-4", "EvidencePackage", "上传 → 云端", "HTTP/MQTT", "每次复核一包"]];
-    const rows = [[T.th("编号"), T.th("报文"), T.th("方向"), T.th("传输"), T.th("频率")]];
-    ifs.forEach(r => rows.push([
-      T.td(r[0], { bold: true, color: C.red, align: "center", fontSize: 10.8 }),
-      T.td(r[1], { bold: true, fontSize: 10.8 }), T.td(r[2], { fontSize: 10.8 }),
-      T.td(r[3], { align: "center", fontSize: 10.8 }), T.td(r[4], { fontSize: 10.8 })]));
-    T.table(s, rows, { x: M, y: y0 + 1.84, w: 7.30, colW: [0.72, 1.88, 1.72, 1.18, 1.80], rowH: 0.36 });
 
-    T.card(s, M + 7.52, y0 + 1.84, 4.86, 1.80, C.navy);
-    s.addText("为什么必须拆成四个进程", { x: M + 7.76, y: y0 + 1.96, w: 4.4, h: 0.30, fontFace: F,
-      fontSize: 13, bold: true, color: "FFD27F", isTextBox: true, margin: 0, valign: "middle" });
-    s.addText("任务书要求 AI 模块只能发送高层指令，不得直接控制底层执行机构。" +
-      "把对执行器的访问集中到唯一进程，并让该进程不加载任何模型，" +
-      "网关才能在感知或任务进程异常退出后继续工作，把车辆按原路线送完。" +
-      "进程内的函数调用边界做不到这一点：崩溃是整个进程一起崩。", {
-      x: M + 7.76, y: y0 + 2.32, w: 4.40, h: 1.22, fontFace: F, fontSize: 10.8,
-      color: "DCE9F5", isTextBox: true, margin: 0, valign: "top", lineSpacing: 15.5 });
+    // 横向排布：硬件 1.28 寸，进程 2.30 寸，进程之间留 1.10 寸给接口标注
+    const HW = 1.28, PW = 2.30, GUT = 1.10;
+    const X = { cam: 0.42, per: 2.12, mis: 5.52, gw: 8.92, act: 11.62 };
+    const BY = y0 + 0.06, BH = 2.00;
 
-    const sch = [["五份 Schema 全部 additionalProperties: false", "detection_event / control_command / command_ack / status_report / evidence_package"],
-                 ["51 项一致性校验，含 9 条反例", "Schema 与代码、网关硬编码常量与 Schema 范围逐条交叉比对；反例构造越界报文，必须全部被拦截"],
-                 ["改动走 ALLOWED_DRIFT 白名单", "新增可选字段通知即可；修改字段语义需全组重评审；增删指令白名单默认不批准"]];
-    sch.forEach(([t, d], i) => {
-      const y = y0 + 3.88 + i * 0.56;
-      T.card(s, M, y, W - M * 2, 0.50);
-      s.addText(t, { x: M + 0.24, y, w: 4.30, h: 0.50, fontFace: F, fontSize: 11.2,
-        bold: true, color: C.navy, isTextBox: true, margin: 0, valign: "middle" });
-      s.addText(d, { x: M + 4.66, y, w: 7.70, h: 0.50, fontFace: F, fontSize: 10.2,
-        color: C.muted, isTextBox: true, margin: 0, valign: "middle" });
+    function hwBox(x, title, lines) {
+      s.addShape("roundRect", { x, y: BY + 0.34, w: HW, h: BH - 0.68, rectRadius: 0.05,
+        fill: { color: C.card }, line: { color: C.muted, width: 1, dashType: "dash" } });
+      s.addText(title, { x, y: BY + 0.46, w: HW, h: 0.30, align: "center",
+        fontFace: F, fontSize: 11, bold: true, color: C.muted, isTextBox: true, margin: 0, valign: "middle" });
+      s.addText(lines, { x, y: BY + 0.80, w: HW, h: BH - 1.20, align: "center",
+        fontFace: F, fontSize: 9.2, color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 12.5 });
+    }
+    function procBox(x, name, cn, col, lines, owns) {
+      s.addShape("roundRect", { x, y: BY, w: PW, h: BH, rectRadius: 0.06,
+        fill: { color: C.white }, line: { color: col, width: 1.75 } });
+      s.addShape("rect", { x, y: BY, w: PW, h: 0.42, fill: { color: col }, line: { color: col, width: 0.5 } });
+      s.addText(name + "\n" + cn, { x, y: BY, w: PW, h: 0.42, align: "center", valign: "middle",
+        fontFace: F, fontSize: 11, bold: true, color: C.white, isTextBox: true, margin: 0 });
+      s.addText(lines, { x: x + 0.14, y: BY + 0.52, w: PW - 0.28, h: BH - 1.06,
+        fontFace: F, fontSize: 9.8, color: C.text, isTextBox: true, margin: 0, valign: "top", lineSpacing: 14 });
+      s.addText(owns, { x: x + 0.14, y: BY + BH - 0.46, w: PW - 0.28, h: 0.36,
+        fontFace: F, fontSize: 9, color: C.muted, isTextBox: true, margin: 0, valign: "middle" });
+    }
+    /** 进程之间的箭头：箭身居中，编号与报文名在上，传输方式与频率在下，都收在 1.10 寸的通道内 */
+    function flow(x, no, msg, spec, col) {
+      s.addText(no + "\n" + msg, { x, y: BY + 0.44, w: GUT, h: 0.56, align: "center",
+        fontFace: F, fontSize: 9, bold: true, color: col, isTextBox: true, margin: 0, valign: "bottom", lineSpacing: 11.5 });
+      s.addShape("rightArrow", { x: x + 0.06, y: BY + 1.04, w: GUT - 0.12, h: 0.34,
+        fill: { color: col }, line: { color: col, width: 0.5 } });
+      s.addText(spec, { x, y: BY + 1.42, w: GUT, h: 0.50, align: "center",
+        fontFace: F, fontSize: 8.5, color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 11 });
+    }
+
+    hwBox(X.cam, "相机", "1080p RGB\n光学变焦");
+    procBox(X.per, "perception", "感知", C.blue,
+      "L1 目标检测 30 Hz\nL2 分割 + 几何读数\nL2′ OCR 铭牌\nL3 非监督未知异常\nL4 规则仲裁 六种结论",
+      "绝不碰　驱动实例");
+    procBox(X.mis, "mission", "任务", C.navy,
+      "十状态复核状态机\n复核预算 N_max\n三条抑制规则\n针孔前馈 + 增益调度 PID",
+      "绝不碰　驱动、模型");
+    procBox(X.gw, "gateway", "安全网关", C.red,
+      "指令白名单 五项校验\n参数硬限，写死在源码\n心跳看门狗 1.5 s 接管\n四个驱动实例（唯一）",
+      "绝不碰　模型、图像");
+    hwBox(X.act, "底盘 · 云台", "暂停 / 低速\n移动至观察点\n转向 / 变焦\n恢复路线");
+
+    // 相机与执行机构两端的短箭头
+    [[X.cam + HW + 0.06, C.muted], [X.gw + PW + 0.06, C.red]].forEach(([x, col]) => {
+      s.addShape("rightArrow", { x, y: BY + 1.04, w: 0.30, h: 0.34,
+        fill: { color: col }, line: { color: col, width: 0.5 } });
     });
-    T.foot(s);
-    s.addNotes("四个进程的边界按安全职责划分，不按代码量划分。被问到为什么拆得这么细，看右上那段：任务书要求 AI 只能发高层指令，" +
-      "要做到这一点，网关必须独立成进程并且不加载模型。五份 Schema 是冻结的接口契约，配 51 项校验保证开发过程中" +
-      "不被改动。");
+    s.addText("串口", { x: X.gw + PW, y: BY + 1.42, w: 0.42, h: 0.26, align: "center",
+      fontFace: F, fontSize: 8.5, color: C.muted, isTextBox: true, margin: 0, valign: "top" });
+
+    flow(X.per + PW, "IF-1", "检出事件", "PUB/SUB\n10 Hz + 按需", C.blue);
+    flow(X.mis + PW, "IF-2", "控制指令 / 应答", "REQ/REP\n事件驱动 + 5 Hz 心跳", C.red);
+
+    // IF-3：网关向所有进程回播状态，画成一条自右向左的横箭头
+    const SY = BY + BH + 0.14;
+    s.addShape("leftArrow", { x: X.per + 0.20, y: SY, w: X.gw + PW - X.per - 0.40, h: 0.32,
+      fill: { color: C.greenSoft }, line: { color: C.green, width: 1 } });
+    s.addText("IF-3　StatusReport　网关 → 所有进程　20 Hz + 安全事件插播（感知据此判断正处于复核态）", {
+      x: X.per + 0.46, y: SY, w: X.gw + PW - X.per - 0.92, h: 0.32, align: "center",
+      fontFace: F, fontSize: 9.5, bold: true, color: C.green, isTextBox: true, margin: 0, valign: "middle" });
+
+    // 证据链：感知与任务各写一份到同一目录，上传进程读目录组包上云
+    const UY = SY + 0.48, UH = 0.96;
+    [X.per + PW / 2, X.mis + PW / 2].forEach(cx => {
+      s.addShape("downArrow", { x: cx - 0.13, y: SY + 0.32, w: 0.26, h: 0.16,
+        fill: { color: C.amber }, line: { color: C.amber, width: 0.5 } });
+    });
+    T.card(s, X.per, UY, X.mis + PW - X.per, UH, C.amberSoft);
+    s.addText("证据目录　<run_id>/<event_id>/", { x: X.per + 0.20, y: UY + 0.08, w: 3.2, h: 0.30,
+      fontFace: F, fontSize: 10.5, bold: true, color: "8A5200", isTextBox: true, margin: 0, valign: "middle" });
+    s.addText("第五条接口，但不走总线：before / after 两张图与两份 sidecar 由感知和任务分别写入，上传进程读同一目录组包。", {
+      x: X.per + 0.20, y: UY + 0.40, w: 5.30, h: 0.48, fontFace: F, fontSize: 9.2,
+      color: "70430A", isTextBox: true, margin: 0, valign: "top", lineSpacing: 12.5 });
+
+    const UP = 8.36, CL = 10.90, CW = 12.90 - CL;
+    s.addShape("rightArrow", { x: X.mis + PW + 0.10, y: UY + 0.30, w: 0.34, h: 0.34,
+      fill: { color: C.amber }, line: { color: C.amber, width: 0.5 } });
+    T.card(s, UP, UY, 2.00, UH);
+    s.addText("uploader　上传", { x: UP + 0.14, y: UY + 0.08, w: 1.72, h: 0.30,
+      fontFace: F, fontSize: 10.5, bold: true, color: C.navy, isTextBox: true, margin: 0, valign: "middle" });
+    s.addText("配对 before/after 组包\n经 HTTP 或 MQTT 上传", { x: UP + 0.14, y: UY + 0.40, w: 1.72, h: 0.48,
+      fontFace: F, fontSize: 9.2, color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 12.5 });
+
+    s.addShape("rightArrow", { x: UP + 2.10, y: UY + 0.30, w: 0.34, h: 0.34,
+      fill: { color: C.navy }, line: { color: C.navy, width: 0.5 } });
+    s.addText("IF-4", { x: UP + 2.02, y: UY + 0.04, w: 0.50, h: 0.24, align: "center",
+      fontFace: F, fontSize: 8.5, bold: true, color: C.navy, isTextBox: true, margin: 0, valign: "middle" });
+    T.card(s, CL, UY, CW, UH, C.navy);
+    s.addText("云端", { x: CL + 0.16, y: UY + 0.08, w: CW - 0.32, h: 0.30, fontFace: F,
+      fontSize: 10.5, bold: true, color: "FFD27F", isTextBox: true, margin: 0, valign: "middle" });
+    s.addText("台账入库 · 人工复核裁决\n模型版本管理", { x: CL + 0.16, y: UY + 0.40, w: CW - 0.32, h: 0.48,
+      fontFace: F, fontSize: 9.2, color: "DCE9F5", isTextBox: true, margin: 0, valign: "top", lineSpacing: 12.5 });
+
+    // 收口：为什么必须拆成四个进程
+    const RY = UY + UH + 0.26;
+    T.card(s, M, RY, W - M * 2, 0.86, C.blueSoft);
+    s.addText("虚线框是硬件，实线框是进程。四个进程只有网关持有驱动实例，" +
+      "其余三个即使写错代码也没有可以调用的驱动；网关又不加载任何模型，" +
+      "所以感知或任务进程崩溃时它还活着，能把车辆按原路线送完。" +
+      "四条接口的报文格式在编码前就冻结成五份 JSON Schema——detection_event、control_command、command_ack、\n" + "status_report、evidence_package，字段全部 additionalProperties: false，配 51 项一致性校验。", {
+      x: M + 0.28, y: RY, w: 11.85, h: 0.86, fontFace: F, fontSize: 10.2,
+      color: C.navy, isTextBox: true, margin: 0, valign: "middle", lineSpacing: 14 });
+    T.foot(s, "接口契约冻结于开题评审；改动走 ALLOWED_DRIFT 白名单，修改字段语义需全组重评审");
+    s.addNotes("这一页是系统的全貌。从左往右是一条链：相机采集，感知跑四路模型并由 L4 仲裁，任务决定停不停车、" +
+      "怎么对准和变焦，网关校验后才真正驱动底盘与云台。绿色那条自右向左的箭头是网关回播的状态，" +
+      "感知靠它判断自己正处于复核态。下面一行是证据链：感知与任务各写一份到同一个证据目录，" +
+      "上传进程读目录组包上云，这条不走总线，因为五份 Schema 已经冻结，不容新增字段。" +
+      "被问到为什么拆四个进程，答案在最下面那段：只有网关持有驱动实例，而且它不加载模型。");
   }
 
   // ============================================================ 数据流
