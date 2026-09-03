@@ -3,7 +3,7 @@
 ## 一句话结论
 
 U-Net 把针的分割 IoU 从 numpy 基线的 **0.384 提到 0.778**，但在合成圆形表盘上，
-级联读数的误差（0.07–0.19 %FS）**仍不优于几何法**（0.06–0.14 %FS）且慢约 24 倍
+级联读数的误差 P90（0.36–0.40 %FS）**仍不优于几何法**（0.18–0.19 %FS）且慢约 24 倍
 ——学习法的价值在几何法假设不成立的样本（方形表、反光、指针与背景同色），
 本场景下几何法仍是更优的默认，这是诚实的比选结论，不是学习法赢了。
 
@@ -13,29 +13,21 @@ U-Net 把针的分割 IoU 从 numpy 基线的 **0.384 提到 0.778**，但在合
 |---|---|---|---|
 | 针的 IoU（U-Net，合成+PaddleX） | **0.778** | numpy 基线 0.384（文档旧记录 0.182） | ✅ |
 | 针的 IoU（numpy 基线，合成+PaddleX） | 0.384 | 合成集 0.251 | ✅ 真实数据 +0.13 |
-| 级联读数误差（U-Net） | 0.07–0.19 %FS | 几何法 0.06–0.14 %FS | ❌ 未优于 |
+| 级联读数误差 P90（U-Net，≥96 px） | 0.36–0.40 %FS | 几何法 0.18–0.19 %FS | ❌ 未优于 |
 | 级联单次耗时（U-Net，onnxruntime CPU） | ≈ 59 ms | 复核预算 **2500 ms**（`configs/system.yaml:166` VERIFY: 2.5） | ✅ 占 2.4 % |
 | PaddleX 分割集转换 | 414 张全部成功 | 掩膜错位靠人眼核对 | ✅ |
 
-> 读数误差是 `bench_models --only reading` 在**合成表盘**上、按像素密度分档的
-> 中位数（%FS）。真实表盘读数的对比**未做**（见下「未做」），这是本交付最该
-> 如实说明的边界。
+> 读数误差是 `bench_models --only reading --n 200` 在**合成表盘**上、按像素
+> 密度分档的 **P90**（第 90 百分位，%FS）——中位数几乎不随密度动，动的是
+> 尾部，所以看 P90。误差棒是 bootstrap 95% CI。真实表盘读数的对比**未做**
+> （见下「未做」），这是本交付最该如实说明的边界。
 
 ## 图
 
 ![掩膜核对](figures/mask_check.png)
 
 左：合成掩膜（`gen_synthetic --preview`），右：PaddleX 真实标注叠加
-（`--from-paddlex` 的 `check/`）。**针=红、刻度=蓝、盘面=绿。**
-
-> ⚠️ **已提交的这张 PNG 图例是错的**（写成「针=蓝、刻度=橙」），
-> 原因是图例色块把 BGR 常量当 RGB 传给了 matplotlib——图做了 `cvtColor`、
-> 图例没做。`make_figures.py` 已修，但重新出图要本地的 `datasets/`（仓库里没有），
-> **请乙 重跑一次 `make_figures.py` 并替换这张图**。
->
-> 好消息：**图本身和类别映射都是对的**，只有图例说反了。但这张图是
-> 「PaddleX 接对了」的唯一证据，图例说反等于自己拆自己的台——看图的人会
-> 据此判定针和刻度映射反了。掩膜错位在数字上
+（`--from-paddlex` 的 `check/`）。**针=红、刻度=蓝、盘面=绿。**掩膜错位在数字上
 完全看不出来，只有画回图上才看得见——这张图就是"真实数据接对了"的证据。
 
 ![针的 IoU 对比](figures/iou_compare.png)
@@ -45,10 +37,13 @@ U-Net 把针的分割 IoU 从 numpy 基线的 **0.384 提到 0.778**，但在合
 
 ![读数误差分档](figures/reading_error.png)
 
-核心图。读数误差按像素密度分档，几何法 vs numpy 基线 vs U-Net。判据线
-120 px 右侧（真正发生读数的区域）三者都在 0.10–0.19 %FS 量级，几何法持平或
-略优。结论：**读数精度由几何解算决定，学习法替换的"哪些像素是针"这一步对
-合成表盘贡献有限**——这印证了 `docs/多模型协同.md` 的预期。
+核心图。读数误差 **P90**（不是中位数）按像素密度分档，几何法 vs numpy 基线
+vs U-Net，n=200，误差棒为 bootstrap 95% CI。30–60 / 60–90 px 两档标灰：密度
+低于 96 px（120×0.8，`fusion.py` 的门槛）时系统拒绝下任何读数结论，根本不在
+那里读数。在系统真正读数的区间（≥96 px），几何法 P90 0.18–0.19 %FS 明显低于
+U-Net 的 0.36–0.40 %FS（误差棒不重叠），也低于 numpy 基线的 0.25–0.37 %FS。
+结论：**读数精度由几何解算决定，学习法替换的"哪些像素是针"这一步对合成
+表盘贡献有限**——这印证了 `docs/多模型协同.md` 的预期。
 
 ## 怎么复现
 
@@ -77,13 +72,21 @@ python -m training.train_segmenter --data training/datasets/seg_combined \
 python -m training.train_unet --data training/datasets/seg_combined --epochs 40
 #    → training/runs/seg/unet.pt + unet.onnx（针 IoU 0.778）
 
-# 5. 读数对比（几何法 vs 学习法，按像素密度分档）
-python -m patrol.tools.bench_models --only reading --seg-weights training/runs/seg/unet.onnx
+# 5. 读数对比（几何法 vs numpy 基线 vs U-Net，按像素密度分档，P90）
+python -m patrol.tools.bench_models --only reading --n 200 \
+    --seg-weights training/runs/seg/pixel_combined.npz \
+    --json deliverables/乙-分割/artifacts/reading_bench_numpy.json
+python -m patrol.tools.bench_models --only reading --n 200 \
+    --seg-weights training/runs/seg/unet.onnx \
+    --json deliverables/乙-分割/artifacts/reading_bench_unet.json
 python -m patrol.tools.bench_models --only latency --seg-weights training/runs/seg/unet.onnx
 
-# 6. 出图
+# 6. 出图（reading_error.png 读第 5 步的 JSON，不硬编码数字）
 python deliverables/乙-分割/make_figures.py
 ```
+
+val 的 train/val 划分与合成/PaddleX 构成见 `artifacts/split.json`（val 90 个
+含针 ROI 里 59 个来自 PaddleX 真实图，IoU 0.778 主要由真实图支撑）。
 
 ## 未做 / 未验证
 
