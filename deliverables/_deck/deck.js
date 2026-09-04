@@ -577,7 +577,7 @@ module.exports = function (pres, IMG) {
         color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 13.5 });
     });
     const gates = [["接口一致性校验　57 项", "python -m patrol.tools.validate"],
-                   ["自动化测试　505 项，覆盖率 75 %", "python -m pytest -q"],
+                   ["自动化测试　507 项，覆盖率 75 %", "python -m pytest -q"],
                    ["端到端实跑　300 s 一轮", "python -m patrol.tools.run_all --seconds 300"]];
     gates.forEach(([t, cmd], i) => {
       const y = y0 + 2.86 + i * 0.62;
