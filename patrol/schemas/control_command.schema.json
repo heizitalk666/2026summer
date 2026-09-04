@@ -70,6 +70,7 @@
         "CREEP_FORWARD",
         "GOTO_OBSERVE",
         "PTZ_SET",
+        "PTZ_RATE",
         "HEARTBEAT"
       ]
     },
@@ -184,6 +185,25 @@
       "if": {
         "properties": {
           "command": {
+            "const": "PTZ_RATE"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      },
+      "then": {
+        "properties": {
+          "params": {
+            "$ref": "#/$defs/ratePar"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
             "const": "HEARTBEAT"
           }
         },
@@ -286,6 +306,33 @@
           ]
         }
       }
+    },
+    "ratePar": {
+      "type": "object",
+      "required": [
+        "pan_dps",
+        "tilt_dps",
+        "ttl_ms"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "pan_dps": {
+          "type": "number",
+          "minimum": -60.0,
+          "maximum": 60.0
+        },
+        "tilt_dps": {
+          "type": "number",
+          "minimum": -40.0,
+          "maximum": 40.0
+        },
+        "ttl_ms": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 500
+        }
+      },
+      "$comment": "A1：云台速率闭环。ttl_ms 是自失效时长——超过它没有新指令刷新，网关把云台速度归零，防止 mission 崩溃时云台一直转到限位。"
     },
     "hbPar": {
       "type": "object",

@@ -267,80 +267,7 @@
             }
           },
           "l2_reading": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "object",
-                "required": [
-                  "kind",
-                  "value",
-                  "unit",
-                  "range_min",
-                  "range_max",
-                  "in_normal_band",
-                  "reading_confidence",
-                  "roi"
-                ],
-                "additionalProperties": false,
-                "properties": {
-                  "kind": {
-                    "enum": [
-                      "POINTER_GAUGE",
-                      "DIGITAL_DISPLAY",
-                      "INDICATOR_LIGHT",
-                      "SWITCH_POSITION"
-                    ]
-                  },
-                  "value": {
-                    "type": [
-                      "number",
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "unit": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "range_min": {
-                    "type": [
-                      "number",
-                      "null"
-                    ]
-                  },
-                  "range_max": {
-                    "type": [
-                      "number",
-                      "null"
-                    ]
-                  },
-                  "in_normal_band": {
-                    "type": [
-                      "boolean",
-                      "null"
-                    ]
-                  },
-                  "reading_confidence": {
-                    "type": "number",
-                    "minimum": 0,
-                    "maximum": 1
-                  },
-                  "roi": {
-                    "type": "array",
-                    "items": {
-                      "type": "number",
-                      "minimum": 0
-                    },
-                    "minItems": 4,
-                    "maxItems": 4
-                  }
-                }
-              }
-            ]
+            "$ref": "#/$defs/reading"
           },
           "quality": {
             "$comment": "差异清单 A4 增补的可选字段（ICD 冻结规则：新增可选字段=次版本号+1，通知即可）。方案书 §6.4 的四项质量指标，ICD v1.0 遗漏。",
@@ -586,6 +513,83 @@
         "DOOR_OPEN",
         "CABLE_LOOSE"
       ]
+    },
+    "reading": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "value",
+            "unit",
+            "range_min",
+            "range_max",
+            "in_normal_band",
+            "reading_confidence",
+            "roi"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "POINTER_GAUGE",
+                "DIGITAL_DISPLAY",
+                "INDICATOR_LIGHT",
+                "SWITCH_POSITION"
+              ]
+            },
+            "value": {
+              "type": [
+                "number",
+                "string",
+                "null"
+              ]
+            },
+            "unit": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "range_min": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "range_max": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "in_normal_band": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "reading_confidence": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "roi": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "minimum": 0
+              },
+              "minItems": 4,
+              "maxItems": 4
+            }
+          }
+        }
+      ],
+      "$comment": "D3：提到 $defs.reading 供 evidence_package 跨文件 $ref 复用。证据包是要进台账、回流训练集的最终产物，它的读数结构不该比中间报文校验更松。"
     }
   }
 }

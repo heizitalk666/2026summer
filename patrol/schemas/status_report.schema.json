@@ -321,7 +321,8 @@
                 "null"
               ],
               "minimum": 0,
-              "maximum": 100
+              "maximum": 5000,
+              "$comment": "D1：这是底盘报上来的**实测值**，不是指令参数。上限焊在验收指标 100 ms 上会让『制动超标』这条报文整条解析失败，恰好丢掉最该留证的证据。Schema 只挡明显非法的量级，100 ms 的验收判定由网关按 limits.BRAKE_LATENCY_LIMIT_MS 做逻辑判断并抛 SafetyEvent。"
             },
             "detail": {
               "type": "string",

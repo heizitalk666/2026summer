@@ -147,6 +147,29 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "result": {
+            "const": "PREEMPTED"
+          }
+        },
+        "required": [
+          "result"
+        ]
+      },
+      "then": {
+        "properties": {
+          "reject_code": {
+            "type": "null"
+          },
+          "exec_handle": {
+            "type": "string"
+          }
+        }
+      },
+      "$comment": "D2：PREEMPTED 表示指令被更高优先级动作打断（ICD §4.4），语义上不是拒绝，不应带 reject_code。原来只写了 ACCEPTED / REJECTED 两条，于是一条同时带 reject_code 和 exec_handle 的 PREEMPTED 会被放行。"
     }
   ],
   "$defs": {

@@ -303,3 +303,67 @@ def test_end_to_end_over_zeromq(gw):
         req.close()
         gw.stop()
         t.join(timeout=2.0)
+
+
+# ---------------------------------------------------------------- D3 决议 D1
+def test_brake_latency_over_limit_is_reported_not_dropped():
+    """制动超标的报文必须**能通过 Schema**，否则最该留证的证据被丢掉。
+
+    D3 决议 D1：Schema 原来把 `brake_latency_ms` 的上限焊在验收指标 100 ms 上，
+    于是真机制动慢到 150 ms 时，系统拿到的不是"一条记录着超标的报文"，而是一条
+    解析失败的报文。上限已放宽到 5000 ms，100 ms 的判定改由网关做逻辑判断
+    （见 GatewayNode.safety_payload）。
+
+    报文底稿直接取 ICD 里的 SAFETY_EVENT 示例，避免手写必填字段跟不上 Schema。
+    """
+    from patrol.tools import validate as V
+    rep = next(b for b in V._icd_json_blocks()
+               if b and b.get("msg_type") == "STATUS_REPORT"
+               and b.get("report_kind") == "SAFETY_EVENT")
+    rep = json.loads(json.dumps(rep))                 # 别改到别人的底稿
+
+    rep["safety"]["brake_latency_ms"] = 150
+    M.validate(rep, "STATUS_REPORT")                  # 150 ms 必须放行
+    assert 150 > L.BRAKE_LATENCY_LIMIT_MS             # 而判据仍然是 100 ms
+
+    rep["safety"]["brake_latency_ms"] = -1            # 负数物理上不可能，仍该拦下
+    with pytest.raises(M.SchemaViolation):
+        M.validate(rep, "STATUS_REPORT")
+
+
+def test_gateway_annotates_brake_latency_breach(gw):
+    """超标时网关要把判据写进 detail，让证据自带结论而不是只剩一个裸数字。"""
+    ev = {"event_type": "OBSTACLE", "severity": "CRITICAL",
+          "source": "CHASSIS_SAFETY_LAYER", "action_taken": "BRAKE",
+          "brake_latency_ms": 150, "detail": "前方 0.4 m 障碍"}
+    out = gw.safety_payload(ev)
+    assert out["brake_latency_ms"] == 150
+    assert "超过验收指标 100 ms" in out["detail"], out["detail"]
+    assert "前方 0.4 m 障碍" in out["detail"], "原始描述不能被判据覆盖掉"
+
+    ev["brake_latency_ms"] = 95            # 达标时不该加判据
+    assert "超过验收指标" not in gw.safety_payload(ev)["detail"]
+
+    ev["brake_latency_ms"] = None          # 无实测值（如看门狗事件）也不该炸
+    assert gw.safety_payload(ev)["brake_latency_ms"] is None
+
+
+# ---------------------------------------------------------------- D3 决议 A1
+def test_ptz_rate_is_in_schema_but_still_gated_by_the_switch(gw):
+    """A1 落地：`PTZ_RATE` 进了 Schema，但开关关掉时网关仍须拒绝。
+
+    「增删白名单指令」按 ICD §2.5 是要重新评审安全边界的改动。Schema 里有它，
+    不等于网关一定接受它——这两件事分开，正是那条规矩的落点。
+    """
+    cmd = mk("PTZ_RATE", {"pan_dps": 12.0, "tilt_dps": -3.0, "ttl_ms": 300})
+    M.validate(cmd, "CONTROL_COMMAND")        # Schema 认它（v1.0 时会被拦下）
+
+    gw.allow_rate = True
+    assert gw.handle_command(cmd)["result"] == "ACCEPTED"
+
+    gw.allow_rate = False
+    ack = gw.handle_command(mk("PTZ_RATE", {"pan_dps": 12.0, "tilt_dps": -3.0,
+                                            "ttl_ms": 300}))
+    assert ack["result"] == "REJECTED"
+    assert ack["reject_code"] == "NOT_IN_WHITELIST", ack
+    gw.allow_rate = True

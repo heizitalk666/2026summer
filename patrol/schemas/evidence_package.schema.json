@@ -296,10 +296,8 @@
           ]
         },
         "l2_reading": {
-          "type": [
-            "object",
-            "null"
-          ]
+          "$ref": "https://patrol.local/schemas/detection_event.schema.json#/$defs/reading",
+          "$comment": "D3：复用 IF-1 的完整定义（8 个字段 + kind 枚举 + additionalProperties:false）。原来只写 {\"type\":[\"object\",\"null\"]}，往 after.l2_reading 塞 {\"kind\":\"NO_SUCH_KIND\",\"junk\":1} 会被放行。"
         },
         "multiview_spread": {
           "$comment": "A3：三视角读数极差（% FS），条件式辅视角启用时才有",

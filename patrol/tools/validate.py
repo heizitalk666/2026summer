@@ -12,7 +12,7 @@ D3 评审前这个脚本必须全绿。建议接进 CI，每次改 Schema 自动
   4. 复核时序预算加总是否等于 8.8 s，N_max 是否等于 22
   5. 检查每个状态的超时是否都大于其预算
   6. 比对 ICD 附录 D 内嵌的 Schema 与 schemas/ 下的文件是否一致
-  7. 跑九条反例，确认越界指令、协议外参数、自相矛盾的字段组合都被拦下
+  7. 跑十一条反例，确认越界指令、协议外参数、自相矛盾的字段组合都被拦下
 
 第八项是差异清单 D5 的增补：
   8. 网关硬编码常量 ↔ Schema 的 minimum/maximum 交叉比对
@@ -143,14 +143,15 @@ def check_pixel_density(r: Report) -> None:
 # ---------------------------------------------------------------- 4
 def check_budget(r: Report) -> None:
     print(f"\n{YELLOW}[4] 时序预算与复核预算{RESET}")
-    icd_budget = {"SUSPECT": 0.2, "HALT_REQ": 2.0, "AIM": 1.5, "ZOOM": 1.2,
+    # D3 决议 C10（SUSPECT 三帧 0.2→0.3）与 C4（按需变焦 ZOOM 1.2→1.5）之后的值。
+    icd_budget = {"SUSPECT": 0.3, "HALT_REQ": 2.0, "AIM": 1.5, "ZOOM": 1.5,
                   "CAPTURE": 0.6, "VERIFY": 2.5, "PACK": 0.5, "RESUME": 0.3}
     T_r = sum(icd_budget.values())
-    r.add("ICD §7.2 预算加总 T_r = 8.8 s", abs(T_r - 8.8) < 1e-9, f"{T_r:.1f} s")
+    r.add("ICD §7.2 预算加总 T_r = 9.2 s", abs(T_r - 9.2) < 1e-9, f"{T_r:.1f} s")
 
     L_m, v, T_max = 200.0, 0.5, 600.0
     n = math.floor((T_max - L_m / v) / T_r)
-    r.add("ICD §7.4 N_max = 22", n == 22, f"{n}")
+    r.add("ICD §7.4 N_max = 21", n == 21, f"{n}")
 
     # 当前配置的实际值。**这里必须读配置，不能沿用上面 ICD 算例的 L/v/T_max。**
     # 实车最高只有 0.3 m/s（底盘固件 MAX_SPD 0.1 × 三档，见 docs/底盘固件评审.md），
@@ -176,10 +177,12 @@ def check_budget(r: Report) -> None:
 # ---------------------------------------------------------------- 5
 def check_timeouts(r: Report) -> None:
     print(f"\n{YELLOW}[5] 每个状态的超时都大于其预算{RESET}")
-    budget = {"SUSPECT": 0.2, "HALT_REQ": 2.0, "AIM": 1.5, "ZOOM": 1.2,
+    budget = {"SUSPECT": 0.3, "HALT_REQ": 2.0, "AIM": 1.5, "ZOOM": 1.5,
               "CAPTURE": 0.6, "VERIFY": 2.5, "PACK": 0.5, "RESUME": 0.3}
+    # CAPTURE 超时 1.5→4.0 是 D3 决议 A3 的连锁：条件式三视角走辅视角那条路
+    # 要 2.1 s，1.5 s 会让它必然超时进 ABORT。
     timeout = {"SUSPECT": 0.5, "HALT_REQ": 4.0, "AIM": 3.0, "ZOOM": 2.5,
-               "CAPTURE": 1.5, "VERIFY": 5.0, "PACK": 2.0, "RESUME": 1.0}
+               "CAPTURE": 4.0, "VERIFY": 5.0, "PACK": 2.0, "RESUME": 1.0}
     bad = [s for s in budget if timeout[s] <= budget[s]]
     r.add("ICD §7.2 八个状态全部自洽", not bad,
           "违反: " + ", ".join(bad) if bad else "超时 > 预算")
@@ -195,22 +198,12 @@ def check_timeouts(r: Report) -> None:
 # ---------------------------------------------------------------- 6
 #: 相对 ICD 附录 D 允许存在的差异，逐条对应差异清单里的决议。
 #: 不在这张表里的差异一律判失败——目的是让偏移**可见**，而不是掩盖它。
-ALLOWED_DRIFT = {
-    "DetectionEvent": [
-        ("properties.detections.items.properties.quality",
-         "A4：四项质量指标，新增可选字段（次版本号 +1）"),
-        ("properties.suspect.properties.trigger_rule.oneOf[1].enum[+QUALITY_LOW]",
-         "A4：新增枚举值（次版本号 +1，需同步附录 B.4）"),
-    ],
-    "EvidencePackage": [
-        ("properties.files.items.properties.role.enum[+VERIFY_FRAME_AUX]",
-         "A3：条件式辅视角帧的角色（次版本号 +1）"),
-        ("properties.files.items.properties.role.enum[+CRUISE_VIDEO]",
-         "B3：任务书要求证据含视频，ICD 的 role 枚举里漏了（次版本号 +1）"),
-        ("$defs.snapshot.properties.multiview_spread",
-         "A3：三视角读数极差，新增可选字段（次版本号 +1）"),
-    ],
-}
+#:
+#: **D3 评审后这张表是空的。** A1/A3/A4/B3/D1/D2/D3 六条决议全部落地进 ICD v2.0
+#: 正文，附录 D 由 ``patrol/tools/sync_icd_appendix.py`` 从 ``patrol/schemas/``
+#: 直接生成，不再有"已知但未收编"的偏移。表保留着是因为下一轮评审之间还会再出现
+#: 这种状态——**新的偏移必须登记在这里并注明对应哪条待决议项**，不登记就判失败。
+ALLOWED_DRIFT: dict[str, list[tuple[str, str]]] = {}
 
 
 def _diff_paths(a, b, prefix="") -> list[str]:
@@ -272,7 +265,7 @@ def check_embedded_copies(r: Report) -> None:
 
 # ---------------------------------------------------------------- 7
 def check_counterexamples(r: Report) -> None:
-    print(f"\n{YELLOW}[7] 九条反例必须全部被拦下{RESET}")
+    print(f"\n{YELLOW}[7] 十一条反例必须全部被拦下{RESET}")
     import copy
     ex = {b["msg_type"]: b for b in _icd_json_blocks() if b and "msg_type" in b}
     acks = [b for b in _icd_json_blocks() if b and b.get("msg_type") == "COMMAND_ACK"]
@@ -300,8 +293,16 @@ def check_counterexamples(r: Report) -> None:
         ("SAFETY_EVENT 但 safety = null", "STATUS_REPORT",
          mut(ex["STATUS_REPORT"], lambda o: o.update(report_kind="SAFETY_EVENT",
                                                      safety=None))),
-        ("brake_latency_ms = 150", "STATUS_REPORT",
-         mut(ex["STATUS_REPORT"], lambda o: o["safety"].update(brake_latency_ms=150))),
+        # D1：150 ms 是「超标但真实」的实测值，Schema 放行、由网关判逻辑；
+        # Schema 只该挡负数这种物理上不可能的量。
+        ("brake_latency_ms = -1", "STATUS_REPORT",
+         mut(ex["STATUS_REPORT"], lambda o: o["safety"].update(brake_latency_ms=-1))),
+        ("PREEMPTED 却带 reject_code", "COMMAND_ACK",
+         mut(ack_ok, lambda o: o.update(result="PREEMPTED",
+                                        reject_code="PARAM_OUT_OF_RANGE"))),
+        ("证据包 after.l2_reading 的 kind 不在枚举里", "EVIDENCE_PACKAGE",
+         mut(ex["EVIDENCE_PACKAGE"], lambda o: o["after"].update(
+             l2_reading={"kind": "NO_SUCH_KIND", "junk": 1}))),
         ("中止的复核标记 verify_success = true", "EVIDENCE_PACKAGE",
          mut(ex["EVIDENCE_PACKAGE"], lambda o: (
              o.update(abort={"at_state": "ZOOM", "reason": "STATE_TIMEOUT",
@@ -318,7 +319,7 @@ def check_counterexamples(r: Report) -> None:
         except M.SchemaViolation:
             r.add(f"反例「{name}」", True, "已拦下")
             caught += 1
-    r.add("九条反例全部拦下", caught == 9, f"{caught}/9")
+    r.add("十一条反例全部拦下", caught == len(cases), f"{caught}/{len(cases)}")
 
 
 # ---------------------------------------------------------------- 8
@@ -343,10 +344,10 @@ def check_gateway_vs_schema(r: Report) -> None:
     allowed = set(L.WHITELIST_WITH_RATE)
     r.add("白名单 ⊆ Schema command 枚举", L.WHITELIST <= enum,
           f"Schema {len(enum)} 条，网关基础白名单 {len(L.WHITELIST)} 条")
-    extra = allowed - enum
-    if extra:
-        print(f"  {DIM}·  A1 增补指令尚未写入 Schema: {sorted(extra)}"
-              f"（enable_ptz_rate 生效时需同步）{RESET}")
+    # A1 已决议采纳：PTZ_RATE 必须在 Schema 里，否则速率通路开了也发不出合法报文。
+    r.add("A1 速率指令已写入 Schema", allowed <= enum,
+          "缺: " + ", ".join(sorted(allowed - enum)) if allowed - enum
+          else "PTZ_RATE 在 command 枚举内")
 
 
 def main() -> int:
@@ -363,7 +364,7 @@ def main() -> int:
     total = len(r.items)
     print()
     if r.failed == 0:
-        print(f"{GREEN}PASS{RESET}  Schema 5 份、正例 6 条、反例 9 条、"
+        print(f"{GREEN}PASS{RESET}  Schema 5 份、正例 6 条、反例 11 条、"
               f"内嵌副本一致、算例与预算全部自洽、网关常量与 Schema 同步"
               f"（共 {total} 项）")
         return 0
