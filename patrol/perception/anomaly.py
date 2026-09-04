@@ -178,28 +178,131 @@ class StatisticalAnomaly(IAnomalyDetector):
 
 
 class EfficientADAnomaly(IAnomalyDetector):
-    """EfficientAD 后端。权重就位后启用，接口与统计法一致。
+    """EfficientAD（简化版）后端。训练脚本见 training/train_anomaly.py。
 
-    训练脚本见 training/train_anomaly.py：只用正常样本，不需要缺陷标注。
+    打分语义与统计法一致：特征距离按训练批上的正常分布归一化，除以 6 压到
+    0-1，threshold 0.55 对应 3.3σ。学生-教师蒸馏的代价是推理要跑两个前向
+    （CPU 上约几十毫秒）——部署目标是把学生导成 ONNX 上 NPU，见
+    training/export_rknn.py 与交付记录。
     """
 
     def __init__(self, weights: str, *, threshold: float = 0.55,
                  device: str = "cpu"):
+        self.model_name = "efficientad_s"
         self.threshold = float(threshold)
-        self.weights = weights
+        self.weights = str(weights)
         self.device = device
-        self._net = None
+        # 延迟导入 torch：装不上时由 build_anomaly 退回统计法，这里不崩
+        import torch
+        import torch.nn as nn
+        from torchvision import models, transforms
 
-    def _lazy(self):
-        if self._net is None:
-            raise RuntimeError(
-                "EfficientAD 权重未就位。当前请用 StatisticalAnomaly，"
-                "或先跑 training/train_anomaly.py 训一个出来。")
-        return self._net
+        ck = torch.load(self.weights, map_location=self.device, weights_only=False)
+        if "student" not in ck:
+            raise ValueError("权重文件里没有 student 状态：%s" % self.weights)
+
+        def build(pretrained: bool):
+            m = models.resnet18(weights="DEFAULT" if pretrained else None)
+            return nn.Sequential(*list(m.children())[:6])
+
+        self._teacher = build(True).eval().to(self.device)
+        for p in self._teacher.parameters():
+            p.requires_grad_(False)
+        self._student = build(False).to(self.device)
+        self._student.load_state_dict(ck["student"])
+        self._student.eval()
+        self._d_mu = float(ck.get("d_mu", 0.0))
+        self._d_sigma = float(max(1e-6, ck.get("d_sigma", 1.0)))
+        self._tf = transforms.Compose(
+            [transforms.ToTensor(),
+             transforms.Resize((256, 256), antialias=True)])
 
     def score(self, image: np.ndarray, bbox=None) -> AnomalyResult:
-        self._lazy()
-        raise NotImplementedError
+        roi = _crop(image, bbox)
+        if roi is None:
+            return AnomalyResult(self.model_name, 0.0, self.threshold, False)
+        import torch
+        # 训练时喂的是 BGR→RGB 的 uint8 图（train_anomaly 的 transforms 同款）
+        x = self._tf(roi[:, :, ::-1].copy()).unsqueeze(0).to(self.device)
+        with torch.inference_mode():
+            d = ((self._student(x) - self._teacher(x)) ** 2).mean().item()
+        sigmas = (d - self._d_mu) / self._d_sigma
+        s = float(np.clip(sigmas / 6.0, 0.0, 1.0))
+        return AnomalyResult(self.model_name, s, self.threshold, s > self.threshold)
+
+
+class PadimAnomaly(IAnomalyDetector):
+    """PaDiM(对角协方差简化版)后端。训练脚本见 training/train_anomaly.py。
+
+    打分:预训练主干 layer2+layer3 特征逐位置马氏距离(对角)的 top-k 均值,
+    再按训练集上的分数分布做 σ 归一化——与统计法同一套 0-1 语义
+    (threshold 0.55 ≈ 3.3σ)。权重文件里自带 mu/var 与 d_mu/d_sigma。
+    """
+
+    def __init__(self, weights: str, *, threshold: float = 0.55,
+                 device: str = "cpu"):
+        self.model_name = "padim_s"
+        self.threshold = float(threshold)
+        self.weights = str(weights)
+        self.device = device
+        import torch
+        import torch.nn as nn
+        from torchvision import models, transforms
+        # 小模型用满全部核心反而慢:线程调度开销 > 计算收益,还会和同进程的
+        # 渲染(numpy/cv2 多线程)互相抢核。实测 14 核降到 4 核,单次打分
+        # 更快且帧预算波动更小。
+        torch.set_num_threads(4)
+
+        ck = torch.load(self.weights, map_location=self.device, weights_only=False)
+        if "mu" not in ck or ("var" not in ck and "cov" not in ck):
+            raise ValueError("权重文件里没有 mu/var/cov:%s" % self.weights)
+        children = list(models.resnet18(weights="DEFAULT").children())
+        self._net2 = nn.Sequential(*children[:6]).eval().to(self.device)
+        self._net3 = nn.Sequential(*children[:7]).eval().to(self.device)
+        self._mu = ck["mu"].to(self.device)
+        self._cov = "cov" in ck          # 全协方差版(padim_cov)与对角版共用打分入口
+        if self._cov:
+            self.model_name = "padim_cov_s"
+            self._inv = ck["inv"].to(self.device)
+            self._idx = ck["idx"].to(self.device)
+        else:
+            self._var = ck["var"].to(self.device)
+        self._d_mu = float(ck.get("d_mu", 0.0))
+        self._d_sigma = float(max(1e-6, ck.get("d_sigma", 1.0)))
+        self._topk_frac = float(ck.get("topk_frac", 0.1))
+        self._tf = transforms.Compose(
+            [transforms.ToTensor(),
+             transforms.Resize((256, 256), antialias=True)])
+
+    def _features(self, roi: np.ndarray):
+        import torch
+        x = self._tf(roi[:, :, ::-1].copy()).unsqueeze(0).to(self.device)
+        with torch.inference_mode():
+            f2 = self._net2(x)
+            f3 = torch.nn.functional.interpolate(
+                self._net3(x), size=f2.shape[2:],
+                mode="bilinear", align_corners=False)
+        return torch.cat([f2, f3], dim=1)[0]
+
+    def score(self, image: np.ndarray, bbox=None) -> AnomalyResult:
+        roi = _crop(image, bbox)
+        if roi is None:
+            return AnomalyResult(self.model_name, 0.0, self.threshold, False)
+        import torch
+        with torch.inference_mode():
+            f = self._features(roi)
+            if self._cov:
+                P = f.shape[1] * f.shape[2]
+                Xp = torch.gather(f.permute(1, 2, 0).reshape(P, -1), 1, self._idx)
+                d = torch.einsum("pk,pkj,pj->p", Xp - self._mu, self._inv,
+                                 Xp - self._mu).reshape(f.shape[1], f.shape[2])
+            else:
+                d = ((f - self._mu) ** 2 / self._var).mean(dim=0)
+        k = max(1, int(d.numel() * self._topk_frac))
+        topk = float(d.flatten().topk(k).values.mean())
+        sigmas = (topk - self._d_mu) / self._d_sigma
+        s = float(np.clip(sigmas / 6.0, 0.0, 1.0))
+        return AnomalyResult(self.model_name, s, self.threshold, s > self.threshold)
 
 
 def _crop(image: np.ndarray, bbox):
@@ -221,7 +324,17 @@ def build_anomaly(cfg) -> IAnomalyDetector | None:
     thr = float(cfg.get("perception.l3.threshold", 0.55))
     weights = cfg.get("perception.l3.weights", None)
     if name.startswith("efficientad") and weights and str(weights).endswith(".pt"):
-        return EfficientADAnomaly(weights, threshold=thr)
+        try:
+            return EfficientADAnomaly(weights, threshold=thr)
+        except Exception:
+            # torch 缺失 / 权重损坏 / 下载预训练主干失败 → 退回统计法。
+            # 接口约定：L3 是可降级通路，不能让可选依赖把感知节点拖停。
+            pass
+    if name.startswith("padim") and weights and str(weights).endswith(".pt"):
+        try:
+            return PadimAnomaly(weights, threshold=thr)
+        except Exception:
+            pass
     det = StatisticalAnomaly(threshold=thr,
                              warmup=int(cfg.get("perception.l3.warmup", 30)))
     # 统计法的基线可以预先固化（training/train_anomaly.py），加载上就省掉

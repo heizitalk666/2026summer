@@ -34,6 +34,12 @@ from jsonschema import Draft202012Validator
 from patrol.common import messages as M
 from patrol.gateway import limits as L
 
+# Windows 控制台默认 GBK，报告里的 ↔ 等符号会直接 UnicodeEncodeError。
+# 统一按 UTF-8 输出（errors=replace 保证旧终端也不崩）。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 REPO = Path(__file__).resolve().parents[2]
 ICD = REPO / "docs" / "ICD-RK3576-PATROL-v1.0.md"
 SCHEMA_DIR = REPO / "patrol" / "schemas"

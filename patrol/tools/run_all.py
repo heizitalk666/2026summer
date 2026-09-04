@@ -121,8 +121,10 @@ def main() -> int:
     from patrol.common.config import Config
     cfg = Config.load(a.config)
     env = dict(os.environ, PYTHONPATH=str(REPO), PYTHONUNBUFFERED="1")
-    if a.config:
-        env["PATROL_CONFIG"] = a.config
+    # --config 要显式传给每个节点进程（节点只认 --config 参数，没有读
+    # PATROL_CONFIG 环境变量的代码；只设环境变量的话各节点会静默回落
+    # 到默认配置，而 run_all 自己用新配置——两边跑的是两个世界）。
+    cfg_arg = ["--config", str(a.config)] if a.config else []
 
     procs: list[tuple[str, subprocess.Popen]] = []
     out = subprocess.DEVNULL if a.quiet else None
@@ -138,7 +140,8 @@ def main() -> int:
             print("云端就绪  http://%s:%s/" % (cfg.get("cloud.host"), cfg.get("cloud.port")))
 
     for name, cmd in NODES:
-        p = subprocess.Popen(cmd, cwd=REPO, env=env, stdout=out, stderr=out)
+        p = subprocess.Popen(cmd + cfg_arg, cwd=REPO, env=env,
+                             stdout=out, stderr=out)
         procs.append((name, p))
         print("已启动 %s (pid %d)" % (name, p.pid))
         # 网关要先绑定端口，感知与任务再连上来
@@ -152,6 +155,7 @@ def main() -> int:
         cmd = [sys.executable, "-m", "patrol.tools.console", "--from-start"]
         if url:
             cmd += ["--push", url]
+        cmd += cfg_arg
         procs.append(("console", subprocess.Popen(cmd, cwd=REPO, env=env)))
         print("已启动 console（指令流水）%s"
               % ("" if not url else "，并推送到 %s 的「实时」页" % url))

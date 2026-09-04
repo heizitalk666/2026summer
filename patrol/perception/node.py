@@ -603,11 +603,25 @@ class PerceptionNode:
         """L3 只喂"看起来正常"的样本学习，对每个检出打分。
 
         输出只允许进人工复核队列，不得直接告警（ICD §3.1）。
+
+        按像素密度设门限：训练集只含 ≥60 px 的裁片，更小的 ROI 本来就是
+        分布外；且学习法（PaDiM）在 CPU 上每检出 20+ ms，巡航期每帧对
+        每个小目标都跑会打爆帧预算。巡航期的异常目标（FOREIGN_OBJECT
+        ≈ 83 px）仍会被扫到，复核期变焦后全部达标。
         """
         if self.anomaly is None or not dets:
             return None
+        min_p = float(self.cfg.get("perception.l3.min_density_px", 60.0))
+        ctx = self._context(frame)
+        zoom = float(ctx["ptz"]["zoom"])
         worst = None
         for d in dets:
+            dist = float(d.extra.get("distance_m", 5.0))
+            size = float(d.extra.get("target_size_m",
+                                     CLASS_SIZE_M.get(d.defect_class, 0.15)))
+            p = pixel_density(frame.width, size, zoom, dist, self.hfov1x)
+            if p < min_p:
+                continue
             res = self.anomaly.score(frame.image, d.bbox)
             if worst is None or res.anomaly_score > worst.anomaly_score:
                 worst = res
@@ -878,7 +892,8 @@ class PerceptionNode:
                     self.save_cruise_evidence(frame, ev["event_id"], ev["detections"])
                 self.pub.send(ev)
                 if ev["latency_ms"]["total"] > int(1000 / self.fps):
-                    self.log.warn("单帧超出节拍", total_ms=ev["latency_ms"]["total"])
+                    # 把 capture / infer / postproc 三段都带上，慢在哪一段一眼可见
+                    self.log.warn("单帧超出节拍", **ev["latency_ms"])
                 time.sleep(max(0.0, period - (time.monotonic() - t0)))
         finally:
             self.close()
