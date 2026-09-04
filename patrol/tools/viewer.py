@@ -60,6 +60,29 @@ def _no_display() -> bool:
     return not os.environ.get("DISPLAY")
 
 
+def _parse_window(spec: str) -> tuple[int, int] | None:
+    """把 --window 的取值解析成显示尺寸。返回 None 表示不缩放，按渲染分辨率显示。"""
+    s = (spec or "").strip().lower()
+    if s in ("native", "0", "full", "原尺寸"):
+        return None
+    try:
+        w, h = s.replace("×", "x").split("x")
+        return max(160, int(w)), max(120, int(h))
+    except ValueError:
+        print("--window 看不懂「%s」，按 1280x720 处理。写法是 1600x900 或 native" % spec)
+        return 1280, 720
+
+
+def _fit(img, size):
+    """缩到显示尺寸。缩小一律用 INTER_AREA，默认的双线性会把叠加层的字糊掉。"""
+    if size is None or (img.shape[1], img.shape[0]) == size:
+        return img
+    shrink = size[0] < img.shape[1]
+    return cv2.resize(img, size,
+                      interpolation=cv2.INTER_AREA if shrink else cv2.INTER_CUBIC)
+
+
+
 # 仅作 cfg 缺失时的兜底。判据线的主人是 configs/camera.yaml 的
 # optics.pixel_density_min_px，取值一律走 cfg.get(..., PMIN_DEFAULT)。
 PMIN_DEFAULT = 120.0
@@ -182,6 +205,7 @@ def live_loop(cfg, a) -> int:
     tail = AuditTail(cfg.get("gateway.audit_log", "logs/gateway-audit.jsonl"))
     snap, lines = Snapshot(), []
     headless = a.headless or _no_display()
+    win = _parse_window(a.window)
     out = Path(a.out)
     if headless:
         out.mkdir(parents=True, exist_ok=True)
@@ -218,7 +242,7 @@ def live_loop(cfg, a) -> int:
                 cv2.imwrite(str(out / ("live_%04d.jpg" % n)), img,
                             [cv2.IMWRITE_JPEG_QUALITY, 88])
             else:
-                cv2.imshow("patrol live", cv2.resize(img, (1280, 720)))
+                cv2.imshow("patrol live", _fit(img, win))
                 if (cv2.waitKey(1) & 0xFF) == 27:
                     break
             n += 1
@@ -380,6 +404,8 @@ def main() -> int:
                     help="只出一张第三人称对比图：视锥随变焦收紧")
     ap.add_argument("--live", action="store_true",
                     help="跟着正在跑的系统看：订阅 IF-3、叠加下发的指令，不自己控云台")
+    ap.add_argument("--window", default="1280x720",
+                    help="窗口尺寸，如 1600x900；写 native 就按渲染分辨率原样显示，叠加层的字最清楚")
     ap.add_argument("--out", default="out", help="输出目录")
     ap.add_argument("--seconds", type=float, default=12.0)
     ap.add_argument("--fps", type=int, default=10)
@@ -408,6 +434,7 @@ def main() -> int:
     camera.start(int(cfg.get("camera.width")), int(cfg.get("camera.height")), a.fps)
 
     headless = a.headless or _no_display()
+    win = _parse_window(a.window)
     if headless:
         out.mkdir(parents=True, exist_ok=True)
     pan = tilt = 0.0
@@ -431,7 +458,7 @@ def main() -> int:
                 cv2.imwrite(str(out / ("frame_%04d.jpg" % n)), img,
                             [cv2.IMWRITE_JPEG_QUALITY, 88])
             else:
-                cv2.imshow("patrol scene", cv2.resize(img, (1280, 720)))
+                cv2.imshow("patrol scene", _fit(img, win))
                 k = cv2.waitKey(1) & 0xFF
                 if k == 27:
                     break
