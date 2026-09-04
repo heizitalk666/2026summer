@@ -16,9 +16,6 @@
 git clone https://github.com/heizitalk666/2026summer.git
 cd 2026summer
 
-# ⚠ 这一行不能少：代码全在这个分支上，main 分支里一行代码都没有
-git checkout claude/project-task-review-7c7oc5
-
 python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
 pip install -r requirements.txt                        # 约 80 MB，不需要 GPU
 ```
@@ -110,7 +107,7 @@ patrol/
 cloud/          FastAPI + SQLite 台账、人工复核、模型版本登记
 configs/        system / scene / stub / waypoints / camera / real
 training/       合成数据集生成、检测/分割/异常训练、ONNX 与 RKNN 导出
-tests/          496 条用例（383 个测试函数，参数化展开后 496）
+tests/          502 条用例（389 个测试函数，参数化展开后 502）
 ```
 
 ---
@@ -205,7 +202,7 @@ python -m patrol.tools.viewer --live         # 预览窗口，画面上叠加指
 | 识别 | 四路模型（检测 / 分割 / OCR / 异常）+ 显式仲裁全部在跑，见 [`docs/多模型协同.md`](docs/多模型协同.md) |
 | OCR 互证 | 已在跑真模型（RapidOCR，离线自带权重）；实测 90 px 以上可读，误判冲突全档为 0 |
 | 合成数据集 | 检测框 / 分割掩膜 / OCR / L3 正常集一次产出，掩膜与图像逐像素对齐 |
-| 测试 | 496 条用例，`validate` 51 项全绿 |
+| 测试 | 502 条用例，`validate` 51 项全绿 |
 | YOLO 权重 | 接口与加载逻辑就位，默认走合成检测器，等训练 |
 | RKNN 上板 | 导出脚本就位，等板子 |
 

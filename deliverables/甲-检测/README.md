@@ -62,9 +62,13 @@ mAP50 **0.9949**、mAP50-95 **0.7513**、precision 0.9967、recall 0.9976。
 
 | 文件 | 内容 | 从哪来 | 进 PPT 哪一页 | 状态 |
 |---|---|---|---|---|
-| `figures/results.png` | 训练曲线 | `training/runs/<stage>/` ultralytics 自动生成 | 训练过程页 | ⬜ |
-| `figures/confusion_matrix.png` | 混淆矩阵 | 同上 | 识别效果页 | ⬜ |
-| `figures/PR_curve.png` | PR 曲线 | 同上 | 识别效果页 | ⬜ |
+| `figures/results_cruise.png` | 巡航级训练曲线 | `training/runs/<stage>/` ultralytics 自动生成 | 训练过程页 | ✅ |
+| `figures/confusion_matrix_cruise.png` | 巡航级混淆矩阵（另有 `_normalized_` 归一化版） | 同上 | 识别效果页 | ✅ |
+| `figures/BoxPR_curve_cruise.png` | 巡航级 PR 曲线（另有 P / R / F1 三条） | 同上 | 识别效果页 | ✅ |
+| 复核级的同名三张 | 复核级 `yolo11m` 的训练曲线 / 混淆矩阵 / PR | 同上 | 同上 | ⬜ **模型未训** |
+
+> 图的文件名带 `_cruise` 后缀，是按训练阶段区分的——复核级训出来之后按
+> `_verify` 后缀放进同一个目录即可，一页纸不必再改结构。
 
 ## 怎么复现
 
