@@ -75,8 +75,10 @@ READING_OK                   5       0.4458       2.2835
 | **四类 AI 模型怎么配合把识别做好** | [`docs/多模型协同.md`](docs/多模型协同.md) |
 | 每一步命令怎么跑、出什么 | [`docs/操作步骤.md`](docs/操作步骤.md) |
 | 每个设计决定背后的理由 | [`docs/设计思想.md`](docs/设计思想.md) |
-| 接口定义（冻结基线） | [`docs/ICD-RK3576-PATROL-v2.0.md`](docs/ICD-RK3576-PATROL-v2.0.md) |
-| **D3 评审议程**：方案书与 ICD 的 22 处出入 | [`docs/一致性差异清单-方案书-ICD-v1.0.md`](docs/一致性差异清单-方案书-ICD-v1.0.md) |
+| **对外口径**：每个数怎么来的、哪些没验证 | [`docs/指标汇总表.md`](docs/指标汇总表.md) |
+| 接口定义（冻结基线，D3 后升 v2.0） | [`docs/ICD-RK3576-PATROL-v2.0.md`](docs/ICD-RK3576-PATROL-v2.0.md) |
+| **D3 评审决议**：24 条议题的取舍与落点 | [`docs/一致性差异清单-方案书-ICD-v1.0.md`](docs/一致性差异清单-方案书-ICD-v1.0.md) |
+| 方案书按决议改了哪些地方 | [`docs/方案书修订记录.md`](docs/方案书修订记录.md) |
 | 交给硬件组的串口约定 | [`docs/底盘串口协议.md`](docs/底盘串口协议.md) |
 | 数据集与训练流程 | [`training/README.md`](training/README.md) |
 

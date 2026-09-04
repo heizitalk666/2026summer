@@ -2,11 +2,11 @@
 
     N_max = ⌊ (T_max − L/v) / T_r ⌋
 
-标定算例：L = 200 m，v = 0.5 m/s，T_max = 600 s，T_r = 8.8 s → N_max = 22。
+标定算例：L = 200 m，v = 0.5 m/s，T_max = 600 s，T_r = 9.2 s → N_max = 21。
 
-**T_r 由状态机各状态的预算实时加总，不写死 8.8 s。**差异清单 A3 的条件式
+**T_r 由状态机各状态的预算实时加总，不写死 9.2 s。**差异清单 A3 的条件式
 三视角与 C4 的按需变焦都会改变 T_r，写死就对不上了——tools/validate.py 会
-同时报告 ICD 的 8.8 s 与当前配置的实际值。
+同时报告 ICD 的 9.2 s 与当前配置的实际值。
 
 预算耗尽后 suspect.is_suspect 仍然照常置位，但 suppressed_by =
 BUDGET_EXHAUSTED，事件进入顺延队列按 priority 排序，下一轮巡检优先处理。

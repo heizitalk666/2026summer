@@ -14,7 +14,11 @@
 哪个位置**。这张图是要放进 PPT 精度页的，它承认指标没达标。
 
 脚本从标定的终端输出里解析三项指标，不重算——**指标的真值在 `calibrate` 里，
-这里只做汇总与作图**，避免出现"图上的数和记录里的数对不上"这种最难查的问题。
+这里只做汇总与作图**，避免出现「图上的数和记录里的数对不上」这种最难查的问题。
+
+跑这个脚本需要 matplotlib（与 `deliverables/乙-分割/make_figures.py` 一样，
+是**出图用的依赖，不进 requirements.txt**——运行时那条链路一律用 cv2 画图，
+不引入 matplotlib）。
 """
 from __future__ import annotations
 
@@ -76,22 +80,42 @@ def main(argv=None) -> int:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
+    # 中文字体按 雅黑 → 黑体 → 思源 → 文泉驿 的顺序回退，与
+    # deliverables/乙-分割/make_figures.py 和 patrol/tools/textdraw.py 同一套口径。
+    # 都没有就落到 DejaVu Sans，中文会显示成方块——**那样的图不要往 PPT 上放**。
+    plt.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei",
+                                       "Noto Sans CJK SC", "Source Han Sans SC",
+                                       "WenQuanYi Zen Hei", "DejaVu Sans"]
+    plt.rcParams["axes.unicode_minus"] = False
+
     metrics = ["线性度", "重复性", "基本误差"]
-    fig, axes = plt.subplots(1, 3, figsize=(12.5, 4.0))
+    fig, axes = plt.subplots(1, 3, figsize=(13.0, 4.4))
     for ax, name in zip(axes, metrics):
         vs = [r[name] for r in rows if name in r]
         lim = next(r[name + "_限值"] for r in rows if name + "_限值" in r)
-        ax.hist(vs, bins=12, color="#4C72B0", edgecolor="white")
-        ax.axvline(lim, color="#C44E52", lw=2,
-                   label="limit %.2f %%FS" % lim)
-        ax.axvline(st.median(vs), color="#55A868", lw=2, ls="--",
-                   label="median %.3f" % st.median(vs))
+        med = st.median(vs)
+
+        # 横轴裁到主分布 + 限值那一段。少数几轮出现量级失控（个位数 %FS），
+        # 直接按全量程画会把主分布压成一根柱子，**恰好看不见限值线落在分布哪里**，
+        # 而那正是这张图要回答的问题。裁掉的轮次不藏起来：在图上标出来。
+        cut = max(lim * 1.6, med * 2.0)
+        inside = [v for v in vs if v <= cut]
+        off = sorted(v for v in vs if v > cut)
+        ax.hist(inside, bins=14, range=(min(inside), cut),
+                color="#4C72B0", edgecolor="white")
+        ax.axvline(lim, color="#C44E52", lw=2, label="限值 %.2f %%FS" % lim)
+        ax.axvline(med, color="#55A868", lw=2, ls="--", label="中位 %.3f" % med)
         bad = sum(1 for v in vs if v > lim)
-        ax.set_title("%s  (%s)\n%d/%d over limit" % (LABELS[name], name, bad, len(vs)))
-        ax.set_xlabel("%% FS")
-        ax.set_ylabel("runs")
-        ax.legend(fontsize=8)
-    fig.suptitle("Calibration metrics over %d independent runs　N 次独立标定的指标分布"
+        ax.set_title("%s %s\n%d/%d 轮超限" % (LABELS[name], name, bad, len(vs)))
+        ax.set_xlabel("% FS")
+        ax.set_ylabel("轮次数")
+        ax.legend(fontsize=8, loc="upper right")
+        if off:
+            ax.annotate("另有 %d 轮出图外：%s %%FS"
+                        % (len(off), " / ".join("%.2f" % v for v in off)),
+                        xy=(0.02, 0.90), xycoords="axes fraction",
+                        fontsize=8, color="#C44E52")
+    fig.suptitle("%d 次独立标定的指标分布（每次五点各测 10 次，方案书 §9.3 口径）"
                  % len(rows))
     fig.tight_layout()
     fig.savefig(out / "figures" / "repeatability_seeds.png", dpi=150)

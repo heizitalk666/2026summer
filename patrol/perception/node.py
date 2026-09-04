@@ -155,6 +155,9 @@ class PerceptionNode:
         self.capture_mode = str(cap.get("mode", "conditional")).lower()
         self.burst_n = int(cap.get("burst_n", 3))
         self.burst_interval_ms = int(cap.get("burst_interval_ms", 150))
+        # 下面这两个（连同 self.capture_mode）**目前没有任何地方读**——A3 的条件式
+        # 辅视角只有配置项与 Schema 字段，没有代码路径，见 mission/fsm.py
+        # 的 _st_capture() 说明。留着是为了实现那天不用再改配置结构。
         self.highlight_trigger = float(cap.get("highlight_trigger", 0.12))
         self.cruise_zoom = float(cfg.get("mission.cruise_ptz.zoom", 1.0))
         self.max_zoom = float(cfg.get("optics.max_zoom", 3.0))

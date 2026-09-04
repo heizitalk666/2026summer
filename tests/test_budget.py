@@ -2,10 +2,10 @@
 
     N_max = ⌊ (T_max − L/v) / T_r ⌋
 
-标定算例：L = 200 m，v = 0.5 m/s，T_max = 600 s，T_r = 8.8 s → N_max = 22。
+标定算例：L = 200 m，v = 0.5 m/s，T_max = 600 s，T_r = 9.2 s → N_max = 21。
 
 **T_r 不写死。**差异清单 A3 的三种采集模式与 C4 的按需变焦都会改变单次复核
-耗时，写死 8.8 s 会让预算和实际对不上：模式一改，预算还按老数算，跑到一半
+耗时，写死 9.2 s 会让预算和实际对不上：模式一改，预算还按老数算，跑到一半
 才发现时间不够。这里把"T_r 随配置变化"这件事钉住。
 """
 from __future__ import annotations
@@ -33,7 +33,7 @@ def test_icd_worked_example_reproduces():
     """ICD §7.4 的标定算例必须算得出来，否则文档与实现已经分家。"""
     b = make()
     assert b.T_r == pytest.approx(9.2, abs=1e-9), "各状态预算之和"
-    # ICD 正文写的是 T_r = 8.8 s → N_max = 22；按本仓库的预算表（CAPTURE 按
+    # ICD v2.0 正文写的是 T_r = 9.2 s → N_max = 21；按本仓库的预算表（CAPTURE 按
     # 差异清单 A3 放宽）实际是 9.2 s → 21。差值本身就是 A3 要评审的内容，
     # 所以两个数都写在这里，改了哪一个都会被这条用例拦下来。
     assert b.n_max == math.floor((600.0 - 400.0) / 9.2) == 21

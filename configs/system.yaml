@@ -144,6 +144,8 @@ mission:
   # multiview   = 方案书原样，无条件三视角（抗反光），2.1 s
   # conditional = 差异清单推荐，默认连拍，高光时才追加辅视角
   capture:
+    # ⚠ **这一段目前不生效**：三种模式都还没有代码路径（见 mission/fsm.py
+    #   的 _st_capture() 说明），改这里当前不改变行为。接口与 Schema 已冻结。
     mode: conditional       # conditional | burst | multiview
     burst_n: 3
     burst_interval_ms: 150
@@ -172,7 +174,7 @@ mission:
     track_cooldown_s: 60.0
     waypoint_radius_m: 2.0
     resume_silence_s: 3.0
-  # 复核预算（ICD §7.4）。T_r 由 fsm.budget_s 实时加总，不写死 8.8 s
+  # 复核预算（ICD §7.4）。T_r 由 fsm.budget_s 实时加总，不写死 9.2 s
   #
   # **这三个数按实车重新标过，不是任务书上的标称值。**
   # 读了底盘固件（XiaoChe_APM32）之后才知道：MAX_SPD 0.1 m/s × 三档，
