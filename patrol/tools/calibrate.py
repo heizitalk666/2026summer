@@ -292,10 +292,9 @@ def main() -> int:
     #
     # 所以这里并列报一个"剔除自报低置信度读数"的口径，让两个数都在记录里。
     # 哪个口径写进验收由评审定；**不允许只报好看的那个**。
-    # 阈值 0.90 是实测定下来的，不是拍的：43 轮标定共 2450 次读数里，**正常读数的
-    # confidence 全部恰好等于 1.000**（中位、第 1 百分位、最小值都是 1.0000），
-    # 而 6 次量级失控（偏离该点中位 2.0–14.7°）的 confidence 全部 ≤ 0.879。
-    # 取 0.90 能 6/6 全抓、零误伤；取 0.60 只抓到 3/6。
+    #
+    # 阈值 0.90 也是这批数据定的，不是拍的：取 0.90 能 6/6 全抓、零误伤，
+    # 取 0.60 只抓到 3/6。
     conf_floor = float(cfg.get("perception.reading.confidence_floor", 0.90))
     low = [r for r in ok if float(r.get("confidence", 1.0)) < conf_floor]
     res_hi = None
@@ -339,6 +338,17 @@ def main() -> int:
         f.write("| 中位像素密度 | %.1f px |\n" % p_med)
         f.write("\n## 五点读数标定\n\n```\n%s\n基本误差  %.3f %% FS\n```\n"
                 % (res.report(), basic))
+        if low:
+            f.write("\n> **本轮有 %d / %d 次读数的 `confidence` 低于 %.2f**"
+                    "（算法自报不确定）。上面三个指标按方案书 §9.3 口径把它们"
+                    "一并算了进去；" % (len(low), len(ok), conf_floor))
+            if res_hi is not None:
+                f.write("剔除这些读数后重复性为 **%.3f %% FS**。"
+                        "**主指标仍以上面的 %.3f 为准**，"
+                        "并列这个数只是为了让口径差可见。\n"
+                        % (res_hi.repeatability_pct_fs, res.repeatability_pct_fs))
+            else:
+                f.write("剔除后某些标定点不足 2 次读数，无法重算。\n")
         f.write("\n| 标称读数 | 平均转角 | 极差 | 残差 %% FS |\n|---|---|---|---|\n")
         for p_, r_ in zip(points, res.residuals_pct_fs):
             f.write("| %.4g | %+.3f° | %.3f° | %+.3f |\n"

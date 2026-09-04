@@ -108,6 +108,43 @@ def print_report(cfg, summary: dict) -> None:
         print("台账网页 http://%s:%s/" % (cfg.get("cloud.host"), cfg.get("cloud.port")))
 
 
+#: 缺了这四个里的任何一个，这一轮的小结都不能当测量值用。
+#: cloud 不在里面——``--no-cloud`` 是正经模式，断网自治那条演示就靠它。
+CORE_PROCS: tuple[str, ...] = ("gateway", "mission", "perception", "uploader")
+
+
+def casualty_report(casualties: list[tuple[str, int]]) -> tuple[list[str], int]:
+    """把「有进程中途退出」说清楚，并给出退出码。
+
+    **为什么要专门做这件事。** 有进程死掉时小结照样打得出来——而且看着很正常，
+    只是复核成功率和密度比会莫名其妙地低。彩排时就这么被坑过：上一轮的进程没退
+    干净、占着 8000 与 ``bus.*``，新起的 cloud 与 perception 立刻退出，系统缺着
+    两个进程跑完了 300 秒，小结有模有样（成功率 40 %、密度比 0.65，正常是
+    85 %+ 和 1.8–2.4）。**不盯着那两行 `!!` 就会把它当成真实测量抄进报告。**
+
+    所以这里把话说死，并用退出码 2 把它变成脚本能发现的事——批量跑稳定性时
+    不看终端也能知道哪一轮作废。
+    """
+    core_dead = [(n, rc) for n, rc in casualties if n in CORE_PROCS]
+    if not casualties:
+        return [], 0
+    bar = "!" * 68
+    out = ["", bar,
+           "!! 本轮有进程中途退出：%s"
+           % "、".join("%s(返回码 %s)" % (n, rc) for n, rc in casualties)]
+    if core_dead:
+        out += ["!! 其中 %s 属于核心四进程，**上面这份小结不能当测量值用**。"
+                % "、".join(n for n, _ in core_dead),
+                "!! 最常见的原因是上一轮没退干净、端口被占。清一遍再跑：",
+                "!!   pkill -9 -f 'tools.run_all|cloud.server|"
+                "patrol.(gateway|mission|perception|uploader).node'"]
+    else:
+        out.append("!! cloud 不在核心四进程内，边缘侧的数仍然有效"
+                   "（--no-cloud 本来就是正经模式）。")
+    out.append(bar)
+    return out, (2 if core_dead else 0)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="一键起全系统")
     ap.add_argument("--config", default=None)
@@ -160,12 +197,14 @@ def main() -> int:
     stop = {"flag": False}
     signal.signal(signal.SIGINT, lambda *_: stop.__setitem__("flag", True))
     t0 = time.time()
+    casualties: list[tuple[str, int]] = []
     try:
         while not stop["flag"]:
             time.sleep(0.5)
             dead = [(n, p) for n, p in procs if p.poll() is not None]
             for n, p in dead:
                 print("!! %s 退出，返回码 %s" % (n, p.returncode))
+                casualties.append((n, p.returncode))
                 procs.remove((n, p))
             if not procs:
                 break
@@ -187,7 +226,13 @@ def main() -> int:
                 procs.remove((n, p))
         cfg._d["_no_cloud"] = a.no_cloud       # noqa: SLF001
         print_report(cfg, summarise(cfg))
-    return 0
+
+        lines, rc_out = casualty_report(casualties)
+        for ln in lines:
+            print(ln)
+        # 退出码在 finally 里算好、在外面返回。**不要在 finally 里 return**——
+        # 那会把正在传播的异常（含 Ctrl-C）吞掉。
+    return rc_out
 
 
 if __name__ == "__main__":

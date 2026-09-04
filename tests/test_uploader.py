@@ -297,3 +297,31 @@ def test_flush_on_shutdown_settles_open_verifications(node):
     node.flush()
     assert (d / "manifest.json").exists()
     assert not (node.packer.dir_for(node.run_id, suppressed) / "manifest.json").exists()
+
+
+# ---------------------------------------------------------------- run_all 监管
+def test_run_all_flags_core_process_casualties():
+    """有核心进程中途死掉时，`run_all` 必须喊出来并用退出码 2 标记本轮作废。
+
+    彩排时踩过这个坑：上一轮的进程没退干净占着 8000 与 bus.*，新起的 cloud 与
+    perception 立刻退出，系统缺着两个进程跑完 300 秒——**小结照样打印且看着正常**，
+    只是成功率 40 %、密度比 0.65。不盯着 `!!` 那两行就会把它当成真实测量。
+    """
+    from patrol.tools.run_all import CORE_PROCS, casualty_report
+
+    lines, rc = casualty_report([])
+    assert (lines, rc) == ([], 0), "没有阵亡就不该有噪音"
+
+    # cloud 不算核心：--no-cloud 是正经模式，断网自治那条演示就靠它
+    lines, rc = casualty_report([("cloud", 3)])
+    assert rc == 0 and "cloud" not in CORE_PROCS
+    assert any("边缘侧的数仍然有效" in ln for ln in lines)
+
+    lines, rc = casualty_report([("cloud", 3), ("perception", 1)])
+    assert rc == 2, "核心进程阵亡必须让退出码非零，否则批量跑时发现不了"
+    body = "\n".join(lines)
+    assert "不能当测量值用" in body
+    assert "pkill" in body, "要给出可直接执行的清理命令，不能只说『端口被占』"
+
+    for name in CORE_PROCS:
+        assert casualty_report([(name, 1)])[1] == 2, name
