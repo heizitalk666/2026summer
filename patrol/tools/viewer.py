@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -46,6 +47,18 @@ from patrol.drivers.base import ExecProgress, PTZSpeed, selftest
 from patrol.drivers.factory import build_drivers
 from patrol.scene.optics import pixel_density
 from patrol.tools.textdraw import cjk_available, draw_text, panel, text_size
+
+
+def _no_display() -> bool:
+    """判断当前环境能不能开窗。
+
+    DISPLAY 是 X11 的东西，只有 Linux 一类的系统才靠它。Windows 与 macOS 上
+    cv2.imshow 直接调用系统窗口，跟 DISPLAY 无关，不能因为它没设就退到存帧。
+    """
+    if sys.platform.startswith("win") or sys.platform == "darwin":
+        return False
+    return not os.environ.get("DISPLAY")
+
 
 # 仅作 cfg 缺失时的兜底。判据线的主人是 configs/camera.yaml 的
 # optics.pixel_density_min_px，取值一律走 cfg.get(..., PMIN_DEFAULT)。
@@ -168,7 +181,7 @@ def live_loop(cfg, a) -> int:
     sub = Subscriber(cfg.get("bus.status"), topics=["STATUS_REPORT"])
     tail = AuditTail(cfg.get("gateway.audit_log", "logs/gateway-audit.jsonl"))
     snap, lines = Snapshot(), []
-    headless = a.headless or not os.environ.get("DISPLAY")
+    headless = a.headless or _no_display()
     out = Path(a.out)
     if headless:
         out.mkdir(parents=True, exist_ok=True)
@@ -394,7 +407,7 @@ def main() -> int:
         return 2
     camera.start(int(cfg.get("camera.width")), int(cfg.get("camera.height")), a.fps)
 
-    headless = a.headless or not os.environ.get("DISPLAY")
+    headless = a.headless or _no_display()
     if headless:
         out.mkdir(parents=True, exist_ok=True)
     pan = tilt = 0.0
