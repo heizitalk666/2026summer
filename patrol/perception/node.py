@@ -784,10 +784,16 @@ class PerceptionNode:
     def run_verify(self) -> dict | None:
         """复核态：连拍 + 二级推理，产出一条 stage=VERIFY 的报文。
 
-        A3 三种采集模式由 mission.capture.mode 决定：
-          burst        同一位姿连拍 3 帧（抗云台残余抖动）
-          multiview    无条件三视角（抗玻璃反光）
-          conditional  默认连拍，高光超阈值时才追加辅视角
+        **实际只做了连拍这一种。** ``mission.capture.mode`` 名义上有三种：
+
+          burst        同一位姿连拍 3 帧（抗云台残余抖动）—— 这里做的就是它
+          multiview    无条件三视角（抗玻璃反光）—— **未实现**
+          conditional  默认连拍，高光超阈值时才追加辅视角 —— **未实现**
+
+        辅视角要跨进程：mission 判定 → 经网关下发 ±15° 的 ``PTZ_SET`` →
+        这里抓帧 → 回传读数算极差。接口侧已经冻结（ICD v2.0 §7.2、
+        ``files[].role`` 的 ``VERIFY_FRAME_AUX``、``snapshot.multiview_spread``），
+        实现侧欠着，见 ``patrol/mission/fsm.py`` 的 ``_st_capture()`` 说明。
         """
         frames = self.camera.grab_burst(self.burst_n, self.burst_interval_ms)
         best = max(frames, key=lambda f: _sharpness(f.image))   # 3 帧挑最清晰的
