@@ -121,6 +121,28 @@ def collect(cfg: Config, *, target_id: str, distance_m: float, zoom: float,
     return points, raw, world
 
 
+def _points_from(raw: list[dict], conf_floor: float):
+    """从 raw 记录重建标定点，只保留 confidence ≥ conf_floor 的读数。
+
+    用于并列报一个「剔除算法自报低置信度读数」的口径。**它不替代主指标**——
+    方案书 §9.3 的口径是所有有效读数一视同仁，那个数照常算、照常报。
+    """
+    from collections import OrderedDict
+    groups: "OrderedDict[float, list[float]]" = OrderedDict()
+    for r in raw:
+        if not r.get("ok"):
+            continue
+        if float(r.get("confidence", 1.0)) < conf_floor:
+            continue
+        groups.setdefault(float(r["nominal"]), []).append(float(r["angle_deg"]))
+    pts = []
+    for nom, angs in groups.items():
+        cp = CalibrationPoint(nominal_value=nom)
+        cp.angles_deg.extend(angs)
+        pts.append(cp)
+    return pts, list(groups.values())
+
+
 def _settle(ptz, timeout_s: float = 4.0) -> None:
     import time
     t0 = time.time()
@@ -253,10 +275,39 @@ def main() -> int:
                 for r in ok) if ok else float("nan")
     budget = error_budget(p_med)
 
+    # ---- 算法自报的低置信度读数
+    #
+    # **这一段不改主指标，只把口径摊开。** 标定按方案书 §9.3 是"五点各测 10 次取
+    # 最大偏差"，所有 ok 的读数一视同仁地进统计——上面那三个数就是这么算的，
+    # 不动。但运行时 fusion 并不这样：`_confidence()` 把 reading_confidence
+    # 折进总置信度（0.5×检测 + 0.5×读数），低置信度的读数会被压低分、进人工复核。
+    # 也就是说系统会对"算法自己都不确定"的读数区别对待，标定工具不会。
+    #
+    # 实测这个差别不是理论上的：12 组种子共 600 次读数里，599 次 confidence
+    # 是 1.000 且偏离该点中位 ≤0.55°，唯一一次 confidence 0.498 偏了 9.75°，
+    # 单独把那一轮的重复性从 0.3 推到 3.7 % FS。**算法当时就知道自己不确定。**
+    #
+    # 所以这里并列报一个"剔除自报低置信度读数"的口径，让两个数都在记录里。
+    # 哪个口径写进验收由评审定；**不允许只报好看的那个**。
+    conf_floor = float(cfg.get("perception.reading.confidence_floor", 0.60))
+    low = [r for r in ok if float(r.get("confidence", 1.0)) < conf_floor]
+    res_hi = None
+    if low:
+        pts_hi = _points_from(raw, conf_floor)
+        if all(len(g) >= 2 for g in pts_hi[1]):
+            res_hi = calibrate(pts_hi[0], range_min=float(pri["range_min"]),
+                               range_max=float(pri["range_max"]))
+
     print()
     print(res.report())
     print("基本误差  %.3f %% FS   (限值 0.5)  %s"
           % (basic, "合格" if basic <= 0.5 else "超差"))
+    if low:
+        print("\n低置信度读数  %d / %d 次 confidence < %.2f（算法自报不确定）"
+              % (len(low), len(ok), conf_floor))
+        if res_hi is not None:
+            print("剔除后重复性  %.3f %% FS（主指标仍以上面的 %.3f 为准）"
+                  % (res_hi.repeatability_pct_fs, res.repeatability_pct_fs))
     print("像素密度  %.1f px      理论合成误差 %.3f %% FS"
           % (p_med, budget["total_pct_fs"]))
 
