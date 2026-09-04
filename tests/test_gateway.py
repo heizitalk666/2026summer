@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from patrol import SCHEMA_VERSION
 from patrol.common import messages as M
 from patrol.common.bus import Requester
 from patrol.common.clock import stamps
@@ -27,7 +28,7 @@ RUN_ID = new_run_id()
 
 def mk(command, params, *, issued_by="MISSION_FSM", timeout_ms=2000, **kw):
     mono, utc = stamps()
-    d = {"schema_version": "1.0.0", "msg_type": "CONTROL_COMMAND",
+    d = {"schema_version": SCHEMA_VERSION, "msg_type": "CONTROL_COMMAND",
          "cmd_id": new_uuid(), "seq": 1, "ts_mono_ns": mono, "ts_utc_ms": utc,
          "run_id": RUN_ID, "event_id": new_uuid(), "issued_by": issued_by,
          "command": command, "params": params, "timeout_ms": timeout_ms}

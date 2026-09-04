@@ -35,7 +35,16 @@ from patrol.common import messages as M
 from patrol.gateway import limits as L
 
 REPO = Path(__file__).resolve().parents[2]
-ICD = REPO / "docs" / "ICD-RK3576-PATROL-v1.0.md"
+def _icd_path():
+    """按 glob 找 ICD，升版本号改文件名时不用改代码（v1.0 → v2.0 就踩过一次）。"""
+    hits = sorted((REPO / "docs").glob("ICD-RK3576-PATROL-v*.md"))
+    if len(hits) != 1:
+        raise RuntimeError("docs/ 下应当只有一份 ICD，实际 %d 份" % len(hits))
+    return hits[0]
+
+
+ICD = _icd_path()
+ICD_VERSION = ICD.stem.rsplit("-v", 1)[1]
 SCHEMA_DIR = REPO / "patrol" / "schemas"
 
 GREEN, RED, YELLOW, DIM, RESET = "\033[32m", "\033[31m", "\033[33m", "\033[2m", "\033[0m"
@@ -351,7 +360,8 @@ def check_gateway_vs_schema(r: Report) -> None:
 
 
 def main() -> int:
-    print(f"{YELLOW}接口一致性校验  ICD-RK3576-PATROL v1.0{RESET}")
+    print(f"{YELLOW}接口一致性校验  ICD-RK3576-PATROL v{ICD_VERSION}"
+          f"  报文 schema_version {M.SCHEMA_VERSION if hasattr(M, 'SCHEMA_VERSION') else __import__('patrol').SCHEMA_VERSION}{RESET}")
     r = Report()
     for fn in (check_schemas_valid, check_examples, check_pixel_density,
                check_budget, check_timeouts, check_embedded_copies,

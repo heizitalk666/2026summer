@@ -25,6 +25,7 @@ from typing import Any, Callable
 
 import zmq
 
+from patrol import SCHEMA_VERSION
 from patrol.common.messages import VersionMismatch, check_version
 
 DEFAULT_LINGER_MS = 0
@@ -179,7 +180,7 @@ class Replier:
             rep = handler(req)
         except Exception as e:                       # noqa: BLE001
             rep = {"msg_type": "COMMAND_ACK", "_handler_error": repr(e),
-                   "schema_version": req.get("schema_version", "1.0.0"),
+                   "schema_version": req.get("schema_version", SCHEMA_VERSION),
                    "cmd_id": req.get("cmd_id")}
         self._sock.send(_encode(rep))
         return True
