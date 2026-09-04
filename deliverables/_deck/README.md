@@ -2,9 +2,15 @@
 
 ```bash
 cd deliverables
-npm install pptxgenjs                 # 只需一次
+npm ci                                # 按 package-lock.json 装，版本钉死（^4.0.1）
 NODE_PATH=$(pwd)/node_modules node make_deck.js   # → deliverables/中期答辩.pptx
+cd .. && python deliverables/_deck/qa_layout.py deliverables/中期答辩.pptx   # 版面自检，必跑
 ```
+
+> **版本钉死是有原因的**：pptxgenjs 换个版本，字号度量与自动换行会变，
+> 一页排得下的字可能就排不下了——`qa_layout.py` 会抓到，但那时已经在改版式了。
+> 首次装用 `npm install pptxgenjs` 生成 lock 文件；之后一律 `npm ci`。
+> `node_modules/` 不进版本库（`.gitignore` 已排除）。
 
 版式取自学院模板 `C424_PPT_2024`：顶部蓝色横幅、右上校徽、底部细条、左上「一.节名」
 标签、居中的白色圆角二级标题块。模板套版图切在 `img/tpl/`，几何尺寸与模板逐项对齐。
