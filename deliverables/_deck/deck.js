@@ -163,9 +163,9 @@ module.exports = function (pres, IMG) {
     const data = [
       ["主动补拍：发现异常后改变采集参数", "复核后成像放大 ≥ 1.5 倍", "像素密度比 1.9 至 2.3", "达成"],
       ["目标检测与已知缺陷识别", "巡航级 mAP50 ≥ 0.70", "0.9949（巡航级）", "达成"],
-      ["图像质量评价与读数", "基本误差 ≤ 0.5 % FS；线性度 ≤ 0.4 % FS", "0.469 %；0.267 %", "达成"],
-      ["", "重复性 ≤ 0.3 % FS", "0.321 % FS", "未达成"],
-      ["云台转向与变焦（高层指令）", "超调 ≤ 10 %，调节时间 ≤ 1.5 s", "3×：1.0 %，1.202 s", "达成"],
+      ["图像质量评价与读数", "基本误差 ≤ 0.5 % FS；线性度 ≤ 0.4 % FS", "0.455 %；0.302 %", "达成"],
+      ["", "重复性 ≤ 0.3 % FS", "0.309 % FS", "未达成"],
+      ["云台转向与变焦（高层指令）", "超调 ≤ 10 %，调节时间 ≤ 1.5 s", "3×：1.0 %，1.101 s", "达成"],
       ["未知异常检测（不依赖缺陷标注）", "训练集外异常可检出", "漏报 3.3 %，误报 3.8 %", "达成"],
       ["AI 不得直接控制底层执行机构", "三层安全边界可现场验证", "三条演示均可当场执行", "达成"],
       ["证据包、离线缓存与远程上传", "断网可缓存，恢复后补传", "断点续传与指数退避已实现", "达成"],
@@ -185,9 +185,9 @@ module.exports = function (pres, IMG) {
        "120 px 下限由精度反推：圆盘直径不足 120 px 时，指针角度的像素量化误差已超过 0.5 % FS。" +
        "放大倍数不取固定值，按目标当前像素密度实时算出。"],
       ["唯一未达成的一项及其原因", C.red,
-       "重复性 0.321 % FS 超出本组设定的 0.3 %。原因是几何解算依赖指针尖端的像素级定位，" +
-       "同一表计重复采集时拟合出的指针角度有约 0.15° 波动，折算到量程即为这一超差。" +
-       "下一阶段用学习分割替换指针提取环节，正是针对这一项。"],
+       "重复性 0.309 % FS 超出本组设定的 0.3 %，43 次独立标定里 29 次不合格，是系统性的。" +
+       "原因是几何解算依赖指针尖端的像素级定位，角度波动与指针指向强相关。" +
+       "原设想用学习分割替换该环节，比选后否掉——U-Net 读数反而不如几何法。留作待办。"],
     ];
     src2.forEach(([t, col, d], i) => {
       const x = M + i * 6.30;
@@ -199,7 +199,7 @@ module.exports = function (pres, IMG) {
     });
     T.foot(s, "表中数值为本组按工业测量惯例设定；实测值取自虚拟试验台，桩按真机故障率注入，真值不提供给感知侧");
     s.addNotes("任务书规定的是能力要求，没有给出 0.5 % FS 这类数值，表里的量化指标由本组按工业测量惯例设定。八项中七项达成" +
-      "。重复性 0.321 % FS 超出本组自己设的 0.3 % 限值，这一项写在表里，不回避。");
+      "。重复性 0.309 % FS 超出本组自己设的 0.3 % 限值，43 次独立标定里 29 次不合格，这一项写在表里，不回避。");
   }
 
   // ------------------------------------------------------------ 三
@@ -315,9 +315,9 @@ module.exports = function (pres, IMG) {
       "每条结论附 reasons 字段可逐级追溯，模型给不出这种依据",
       "六种结论各有测试用例", "3.8"],
      ["各模块接口对接\n与进度同步",
-      "五份 Schema 编码前冻结 + 51 项校验",
+      "五份 Schema 编码前冻结 + 57 项校验",
       "四人并行开发，联调时字段必须对得上，不能边写边改",
-      "validate 51 项全过，9 条反例全部被拦下", "3.4"],
+      "validate 57 项全过，11 条反例全部被拦下", "3.4"],
     ].forEach(r => rows.push([
       T.td(r[0], { bold: true, fontSize: 10, color: C.navy }),
       T.td(r[1], { fontSize: 10 }),
@@ -504,7 +504,7 @@ module.exports = function (pres, IMG) {
     s.addText("虚线框是硬件，实线框是进程。四个进程只有网关持有驱动实例，" +
       "其余三个即使写错代码也没有可以调用的驱动；网关又不加载任何模型，" +
       "所以感知或任务进程崩溃时它还活着，能把车辆按原路线送完。" +
-      "四条接口的报文格式在编码前就冻结成五份 JSON Schema——detection_event、control_command、command_ack、\n" + "status_report、evidence_package，字段全部 additionalProperties: false，配 51 项一致性校验。", {
+      "四条接口的报文格式在编码前就冻结成五份 JSON Schema——detection_event、control_command、command_ack、\n" + "status_report、evidence_package，字段全部 additionalProperties: false，配 57 项一致性校验。", {
       x: M + 0.28, y: RY, w: 11.85, h: 0.86, fontFace: F, fontSize: 10.2,
       color: C.navy, isTextBox: true, margin: 0, valign: "middle", lineSpacing: 14 });
     T.foot(s, "接口契约冻结于开题评审；改动走 ALLOWED_DRIFT 白名单，修改字段语义需全组重评审");
@@ -576,8 +576,8 @@ module.exports = function (pres, IMG) {
       s.addText(d, { x: M + 7.74, y: y + 0.36, w: 4.42, h: 0.68, fontFace: F, fontSize: 9.8,
         color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 13.5 });
     });
-    const gates = [["接口一致性校验　51 项", "python -m patrol.tools.validate"],
-                   ["自动化测试　501 项，覆盖率 75 %", "python -m pytest -q"],
+    const gates = [["接口一致性校验　57 项", "python -m patrol.tools.validate"],
+                   ["自动化测试　505 项，覆盖率 75 %", "python -m pytest -q"],
                    ["端到端实跑　300 s 一轮", "python -m patrol.tools.run_all --seconds 300"]];
     gates.forEach(([t, cmd], i) => {
       const y = y0 + 2.86 + i * 0.62;
