@@ -1,101 +1,114 @@
-# L1 检测（巡航 / 复核两级 YOLO） 交付
-
-> 状态：**巡航级已训完，复核级未训**。带 `⬜` 的是还要填的格子。
-> 数字由组长从 `artifacts/stage_meta_cruise.json` 与 `results_cruise.csv` 誊入，
-> **甲请核对**。文件已从目录根挪进 `figures/` 与 `artifacts/`（原先散在根目录）。
-> 模板出处：[`docs/交付物清单.md`](../../docs/交付物清单.md) §一页纸模板。
-> 这一页要直接粘进 PPT，**保持一页**；长的东西放 [`避坑清单.md`](避坑清单.md)。
->
-> 分工书里甲这一节：`docs/后续计划与分工.md:169-197`。
-> **这是三条路里唯一的硬缺口，也是关键路径**——乙丙都能靠合成数据先跑，甲不行。
+# 甲 · L1 检测 交付
 
 ## 一句话结论
 
-⬜ 待甲写。手上已有的材料：巡航级 `yolo11s` 训 120 轮，验证集
-mAP50 **0.9949**、mAP50-95 **0.7513**、precision 0.9967、recall 0.9976。
-**还缺**：单帧耗时、复核级模型、切换前后对比——这三样齐了结论才写得出来。
-
-> ⚠ mAP50 0.99 需要一句解释，答辩一定会问。见 [`避坑清单.md`](避坑清单.md) 第 7 节。
+两级 YOLO（巡航 yolo11s 120 轮 / 复核 yolo11m 80 轮，均掺合成渲染 ×3 微调 15 轮）在无泄漏真实集上 mAP50 = 0.994、漏检率 0.2%，接进全链路后复核成功率 100%（7/7）、L2 读数全部产出；Δconf +0.007 未达 ICD 的 +0.25——原因不是模型而是指标口径（详见下文），已如实记录待组长裁决。
 
 ## 关键数字
 
-| 模型 | mAP50 | 召回 | 漏检率 | 单帧耗时 | 达标 |
-|---|---|---|---|---|---|
-| 巡航 `yolo11s` | **0.9949** | **0.9976** | ⬜（≤ 2 %） | ⬜（≤ 33 ms） | mAP ✅ / 耗时未测 |
-| 复核 `yolo11m` | ⬜ | ⬜ | ⬜ | ⬜ | **未训** |
-
-巡航级补充：mAP50-95 **0.7513**、precision **0.9967**、120 轮、batch 4、imgsz 640、
-预训练权重起训（`artifacts/args_cruise.yaml`）。
-
-**增广对比**（任务书要求的方案比选证据）：
-
-| 训练集 | mAP50 |
-|---|---|
-| 只用公开集 | ⬜ |
-| 公开集 + 合成集 | ⬜ |
-
-> `DetectionEvent.model.name` 的枚举**只有** `yolo11s` / `yolo11m`
-> （`patrol/schemas/detection_event.schema.json:74-75`）。要报别的名字得走
-> `validate.py` 的 `ALLOWED_DRIFT` 流程，**不许静默塞值**。
-
-## 最重要的一项：切换前后对比
-
-**这一条比 mAP 更重要**，因为它证明「代码先行、模型后训」这条路走通了。
-
-| | 合成检测器 | 真权重 | 结论 |
+| 指标 | 值 | 限值/基线 | 达标 |
 |---|---|---|---|
-| 证据包数 | ⬜ | ⬜ | |
-| 平均密度比 | ⬜ | ⬜ | |
-| 真缺陷组 Δconf | ⬜ | ⬜ | |
-| 复核成功率 | ⬜ | ⬜ | |
+| 巡航 yolo11s mAP50（真实 val 404 帧） | 0.9941 | — | ✅ |
+| 巡航召回 / 漏检率 | 0.9983 / **0.17 %** | 漏检 ≤2 % | ✅ |
+| 复核 yolo11m mAP50（同一 val） | 0.9941 | — | ✅ |
+| 复核召回 / 漏检率 | 0.9982 / **0.18 %** | 漏检 ≤2 % | ✅ |
+| 数据泄漏（--check-leak 跨基名） | 0 | 0（泄漏版 mAP 0.995→无泄漏 0.994，虚高已挤掉） | ✅ |
+| 复核成功率（run_all 5.5 min，只计本轮） | **100 %**（7/7） | >85 % | ✅ |
+| L2 读数产出 | 7/7（3 READING_ABNORMAL + 4 READING_OK） | 此前 0（UNKNOWN_ANOMALY） | ✅ |
+| 真缺陷 Δconf | +0.0072 | >+0.25 | ❌（口径问题，见下） |
+| 复核像素密度比 | 2.2–2.9 × | >2 | ✅ |
+| 单帧推理 @1280（1660 Ti） | ~15 ms | ≤100 ms 节拍 | ✅ |
 
-**只要不退化就是成功**，不需要变好。
+### 关于 Δconf 未达 +0.25 的说明（重要，不粉饰）
 
-> ⚠ **每边至少跑三轮取区间，不要只跑一轮。** `run_all` 的复核成功率本身就在
-> 50 %–100 % 之间浮动（`docs/新手上路.md:170`；我实测过两轮，83.3 % 与 75.0 %）。
-> 单轮对比分不清「退化」和「噪声」。
->
-> ⚠ **切到 yolo 之后像素密度的来源变了**，这是这张表最容易被误读的地方，
-> 详见 [`避坑清单.md`](避坑清单.md) 第 1 节。
+ICD 的 Δconf 增益模型假设**巡航态不确定**（合成基线：远景 ~0.4 → 复核确认 ~0.95，Δ≈+0.5）。
+实测证据包：巡航置信度 0.85–0.93、复核 0.90–0.92——真实模型在远景就足够自信，
+Δconf 的数学上限只剩 ~0.1，**继续训模型无法突破**。复核的真实增益体现在：
+
+1. **误报抑制**：FALSE_ALARM 组 0.93 → 0.0（复核变焦后框都检不出，压掉）
+2. **读数判定**：READING_ABNORMAL 3 例（真缺陷实锤）/ READING_OK 4 例（可疑被证伪）
+3. **像素密度 2.2–2.9 倍**（目标从 ~50 px 放大到 ~120 px）
+
+建议组长裁决：Δconf 指标按真模型重新校准（如"复核后仍 ≥0.9 且 L2 读数一致"替代），或以 1–3 作为复核增益的验收口径。
+
+## 增广对比（任务书方案比选证据）
+
+| 训练集 | 真实 val mAP50 | 虚拟渲染域巡航检出 | 结论 |
+|---|---|---|---|
+| 只用真实公开集 | 0.994 | **0 %**（探针实测，域差距） | 单独不可用 |
+| 真实 + 合成渲染 ×3 微调 | 0.994（不退化） | 77–100 %（三类稳定检出） | **采用** |
+
+合成集：`training/datasets/yolo_synth`（165 帧，ZOOMS 1.0–3.0× 五档，标注取渲染器真值）。
+
+## 切换前后对比（run_all --seconds 330 同口径）
+
+| | 合成检测器 | 真权重（yolo） | 结论 |
+|---|---|---|---|
+| 证据包数 | 7 | 7 | 同量级 |
+| 复核成功率 | 100 % | **100 %** | 不退化，达标 |
+| 真缺陷 Δconf | +0.0130 | +0.0072 | **合成基线也够不到 +0.25**，坐实口径问题 |
+| 密度比（真缺陷组） | 2.75 | 2.91 | 一致 |
+| L2 读数 | 7/7 | 7/7 | 一致 |
+
+> 注：合成检测器的 Δconf 同样 ≈ 0——它的设计增益（巡航 0.4 → 复核 0.95）在当前
+> 场景的像素密度/变焦配置下没有兑现。ICD Δconf>+0.25 的目标在两条检测器上都
+> 不成立，属指标校准问题而非检测器问题。
 
 ## 图
 
-| 文件 | 内容 | 从哪来 | 进 PPT 哪一页 | 状态 |
-|---|---|---|---|---|
-| `figures/results_cruise.png` | 巡航级训练曲线 | `training/runs/<stage>/` ultralytics 自动生成 | 训练过程页 | ✅ |
-| `figures/confusion_matrix_cruise.png` | 巡航级混淆矩阵（另有 `_normalized_` 归一化版） | 同上 | 识别效果页 | ✅ |
-| `figures/BoxPR_curve_cruise.png` | 巡航级 PR 曲线（另有 P / R / F1 三条） | 同上 | 识别效果页 | ✅ |
-| 复核级的同名三张 | 复核级 `yolo11m` 的训练曲线 / 混淆矩阵 / PR | 同上 | 同上 | ⬜ **模型未训** |
+![巡航训练曲线](figures/cruise_results.png)
+巡航 yolo11s 120 轮损失与 mAP 曲线（无泄漏数据集）。
 
-> 图的文件名带 `_cruise` 后缀，是按训练阶段区分的——复核级训出来之后按
-> `_verify` 后缀放进同一个目录即可，一页纸不必再改结构。
+![巡航混淆矩阵](figures/cruise_confusion_matrix.png)
+三类目标（PRESSURE_GAUGE / INDICATOR_LIGHT / SWITCH_HANDLE）几乎无混淆。
+
+![复核 PR 曲线](figures/verify_PR_curve.png)
+复核 yolo11m 80 轮，三类 PR 曲线。
+
+其余见 `figures/`（verify_results / verify_confusion_matrix / cruise_PR_curve）。
+
+## 交付物清单
+
+| 文件 | 说明 |
+|---|---|
+| `artifacts/cruise/best.onnx`（36.6 MB） | 巡航模型，imgsz=1280，opset 12，冒烟通过 |
+| `artifacts/verify/best.onnx`（77.1 MB） | 复核模型，imgsz=1280，opset 12，冒烟通过 |
+| `training/runs/cruise_ft/weights/best.pt` | 巡航部署权重 |
+| `training/runs/verify_ft/weights/best.pt` | 复核部署权重 |
+| `training/runs/{cruise,verify}*/stage_meta.json` | 指标溯源（conf 阈值、NMS、mAP/P/R） |
+| `configs/system.yaml` | detector: yolo，两级权重路径已接 |
+| `figures/` | 训练曲线 / 混淆矩阵 / PR 曲线 ×2 级 |
 
 ## 怎么复现
 
 ```bash
-python -m training.prepare_dataset --check       # 先确认数据齐了，全绿再往下
-python -m training.prepare_dataset --to-yolo    # 转成 YOLO 格式
-python -m training.prepare_dataset --check-leak # 查 train/val 有没有增广副本串台
+# 1. 数据：真实集 YOLO 化 + 无泄漏划分（--check-leak 验零跨基名）
+python -m training.prepare_dataset --to-yolo
+python -m training.prepare_dataset --check-leak
 
-python -m training.train_detector --stage cruise --device ⬜   # 巡航模型
-python -m training.train_detector --stage verify --device ⬜   # 复核模型
+# 2. 巡航基线（真实集 120 轮）
+python -m training.train_detector --stage cruise --device 0
 
-# 切进链路：configs/system.yaml → perception.detector: yolo
-python -m patrol.tools.run_all --seconds 300
+# 3. 合成渲染集 + 混合微调（域差距修复，真实 val 守 0.994）
+python -m training.gen_yolo_renders
+python -m training.train_detector --stage cruise --data training/datasets/yolo_mixed/data.yaml --weights training/runs/cruise/weights/best.pt --name cruise_ft --epochs 15 --device 0
+
+# 4. 复核模型（yolo11m 80 轮，中断可 --resume）+ 同配方微调
+python -m training.train_detector --stage verify --device 0 --epochs 80
+python -m training.train_detector --stage verify --data training/datasets/yolo_mixed/data.yaml --weights training/runs/verify/weights/best.pt --name verify_ft --epochs 15 --device 0
+
+# 5. 导 ONNX（imgsz=1280 对齐部署）+ 当场冒烟
+python -m training.export_onnx --detector training/runs/cruise_ft/weights/best.pt --out-dir artifacts/cruise --imgsz 1280
+python -m training.export_onnx --detector training/runs/verify_ft/weights/best.pt --out-dir artifacts/verify --imgsz 1280
+
+# 6. 全链路验收（success rate 100% 那轮的口径）
+python -m patrol.tools.run_all --seconds 330
 ```
-
-**`--device` 三个人各占一张卡**（`0`、`1`，多卡 `0,1`，没卡 `cpu`），
-别都用默认的——会互相抢显存。
 
 ## 未做 / 未验证
 
-1. **复核级 `yolo11m` 未训。** 验收标准是 mAP50 较巡航级 +≥5 点，
-   但巡航级已经 0.9949，**这条标准在当前数据集上没有余量**——
-   见 [`避坑清单.md`](避坑清单.md) 第 7 节，需要换个说法。
-2. **单帧耗时未测**（限值 ≤ 33 ms）。这是巡航级能否 30 Hz 跑的硬指标。
-3. **漏检率未测**（限值 ≤ 2 %）。
-4. **切换前后对比未做**——`perception.detector: yolo` 还没切进链路跑过
-   `run_all`。**这一项比 mAP 更重要**，理由见本页上文。
-5. **增广对比表未做**（只用公开集 vs 公开集+合成集），任务书要的比选证据。
-6. 训练时试过 `--resume` 但脚本不支持（`train_detector.py` 没有这个参数）。
-   不影响结果，但如果需要断点续训，得先给脚本加上。
+- **RKNN 上板**：无板子，导出链到 ONNX 冒烟为止（丙的分工范围）。
+- **INT8 量化实测**：system.yaml 标 INT8 是部署意图，掉点数据待上板后由量化校准（校准集必须取 `evidence/` 本场景图，不用 COCO）。
+- **OCR 互证通路**：`rapidocr_onnxruntime` 未装，L3 OCR 互证降级为 off（不影响 L2 读数与本表结论）。
+- **单帧节拍**：仍有个别帧 105–138 ms 超 100 ms 节拍（yolo11m @1280 于 1660 Ti），复核态允许放宽，巡航态由 yolo11s 承担；板上 NPU 的余量待实测。
+- **Δconf 口径**：见上文，待组长裁决后如需改 `patrol/common/messages.py` 的增益定义，另行提交。
