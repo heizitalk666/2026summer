@@ -1,0 +1,5 @@
+# 甲的对比基线：合成检测器同口径一轮，用于交付物"切换前后对比"表。
+# 只覆盖检测器一项，其余全部继承 system.yaml。
+includes: [system.yaml]
+perception:
+  detector: synthetic
