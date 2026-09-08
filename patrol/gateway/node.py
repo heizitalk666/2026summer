@@ -256,6 +256,29 @@ class GatewayNode:
                 "elapsed_ms": max(0, res.elapsed_ms), "fail_reason": res.fail_reason})
 
     # ------------------------------------------------------------ 主循环
+    def safety_payload(self, ev: dict) -> dict:
+        """把底盘报上来的安全事件整理成 StatusReport.safety。
+
+        **制动时延的验收判定在这里做，不在 Schema 里做**（D3 决议 D1）。原来
+        Schema 把上限焊在验收指标 100 ms 上，真机制动慢到 150 ms 时整条报文解析
+        失败——恰好把最该留证的那条证据丢掉了。现在 Schema 只挡物理上不可能的
+        量级，超标由这里判并写进 detail，让证据自带结论而不是只剩一个裸数字。
+        """
+        lat = ev.get("brake_latency_ms")
+        detail = str(ev.get("detail", ""))
+        if isinstance(lat, (int, float)) and not isinstance(lat, bool) \
+                and lat > L.BRAKE_LATENCY_LIMIT_MS:
+            self.log.error("制动时延超标", brake_latency_ms=lat,
+                           limit_ms=L.BRAKE_LATENCY_LIMIT_MS)
+            detail = ("制动时延 %d ms 超过验收指标 %d ms; %s"
+                      % (lat, L.BRAKE_LATENCY_LIMIT_MS, detail)).strip("; ")
+        return {"event_type": ev["event_type"],
+                "severity": ev.get("severity", "CRITICAL"),
+                "source": ev.get("source", "CHASSIS_SAFETY_LAYER"),
+                "action_taken": ev.get("action_taken", "BRAKE"),
+                "brake_latency_ms": lat,
+                "detail": detail[:256]}
+
     def serve_forever(self) -> None:
         self._running = True
         self.log.info("网关启动", command=self.cfg.get("bus.command"),
@@ -269,12 +292,7 @@ class GatewayNode:
                 ev = self._safety_q.get_nowait()
                 self.log.warn("安全事件", event_type=ev["event_type"],
                               brake_latency_ms=ev.get("brake_latency_ms"))
-                self._publish_status("SAFETY_EVENT", safety={
-                    "event_type": ev["event_type"], "severity": ev.get("severity", "CRITICAL"),
-                    "source": ev.get("source", "CHASSIS_SAFETY_LAYER"),
-                    "action_taken": ev.get("action_taken", "BRAKE"),
-                    "brake_latency_ms": ev.get("brake_latency_ms"),
-                    "detail": str(ev.get("detail", ""))[:256]})
+                self._publish_status("SAFETY_EVENT", safety=self.safety_payload(ev))
 
             if self.watchdog.check():
                 # 看门狗介入：让车**继续走完巡检路线**，不是让车停住。

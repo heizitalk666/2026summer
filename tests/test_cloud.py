@@ -372,3 +372,32 @@ class TestLive:
         m = client.get("/api/live/map").json()
         assert m["waypoints"] and m["targets"]
         assert all({"id", "x_m", "y_m"} <= set(w) for w in m["waypoints"])
+
+
+# ---------------------------------------------------------------- 模型版本登记
+def test_register_models_reads_deliverables(tmp_path):
+    """任务书第 7 项：模型版本管理。接口一直在，登记数一直是 0。
+
+    这条用例盯的是"登记脚本能从三人交付里读出元数据并写进台账"，不是盯具体数字
+    ——数字属于交付方，改了不该让这条红。
+    """
+    from patrol.tools import register_models as RM
+
+    items = RM.collect()
+    assert items, "deliverables/ 下应当能收集到模型元数据"
+    stages = {it["stage"] for it in items}
+    assert {"cruise", "segment", "anomaly"} <= stages, stages
+
+    # 权重不在库里的一律留空，不许编哈希
+    for it in items:
+        assert it["weights_sha"] is None or len(it["weights_sha"]) == 64, it["version"]
+
+    # 只能有一条 active，且必须是系统当前真正启用的那一路（零权重统计法）
+    active = [it for it in items if it["activate"]]
+    assert len(active) == 1 and active[0]["stage"] == "anomaly", active
+
+    db = tmp_path / "ledger.db"
+    assert RM.main(["--db", str(db)]) == 0
+    from cloud.db import Ledger
+    got = Ledger(str(db)).models()
+    assert len(got) == len(items)

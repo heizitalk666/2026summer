@@ -75,16 +75,20 @@ def main():
     print('=' * 68)
     print('二、单次复核耗时 T_r 与复核预算 N_max（A3 / C4 的连锁影响）')
     print('=' * 68)
-    icd = {'SUSPECT': 0.2, 'HALT_REQ': 2.0, 'AIM': 1.5, 'ZOOM': 1.2,
-           'CAPTURE': 0.6, 'VERIFY': 2.5, 'PACK': 0.5, 'RESUME': 0.3}
+    # D3 前的 ICD v1.0 原值，保留下来是为了让「决议改了多少」看得见。
+    icd_v1 = {'SUSPECT': 0.2, 'HALT_REQ': 2.0, 'AIM': 1.5, 'ZOOM': 1.2,
+              'CAPTURE': 0.6, 'VERIFY': 2.5, 'PACK': 0.5, 'RESUME': 0.3}
+    # D3 决议后（C10 SUSPECT 0.2→0.3，C4 ZOOM 1.2→1.5）的 ICD v2.0 值。
+    icd = dict(icd_v1, SUSPECT=0.3, ZOOM=1.5)
     L, v, T_max = 200.0, 0.5, 600.0
 
     variants = [
-        ('ICD v1.0 现状', dict(icd)),
-        ('C4 按需变焦 (ZOOM 1.2→1.5)', dict(icd, ZOOM=1.5)),
-        ('A3 无条件三视角 (CAPTURE 0.6→2.1)', dict(icd, CAPTURE=2.1)),
-        ('A3 无条件三视角 + C4', dict(icd, CAPTURE=2.1, ZOOM=1.5)),
-        ('A3 条件式(推荐) + C4 —— 均值', dict(icd, ZOOM=1.5)),
+        ('ICD v1.0（D3 之前）', dict(icd_v1)),
+        ('仅 C4 按需变焦 (ZOOM 1.2→1.5)', dict(icd_v1, ZOOM=1.5)),
+        ('仅 C10 三帧确认 (SUSPECT 0.2→0.3)', dict(icd_v1, SUSPECT=0.3)),
+        ('A3 无条件三视角 (CAPTURE 0.6→2.1)', dict(icd_v1, CAPTURE=2.1)),
+        ('A3 无条件三视角 + C4 + C10', dict(icd, CAPTURE=2.1)),
+        ('** ICD v2.0：A3 条件式 + C4 + C10（均值）', dict(icd)),
     ]
     print('%-38s %8s %8s' % ('情形', 'T_r [s]', 'N_max'))
     for name, st in variants:
@@ -98,8 +102,9 @@ def main():
     print('=' * 68)
     print('三、ICD §7.2 自洽性：每个状态的超时是否都大于其预算')
     print('=' * 68)
+    # CAPTURE 1.5→4.0：A3 条件式三视角的连锁，见差异清单 §4 C1。
     timeout = {'SUSPECT': 0.5, 'HALT_REQ': 4.0, 'AIM': 3.0, 'ZOOM': 2.5,
-               'CAPTURE': 1.5, 'VERIFY': 5.0, 'PACK': 2.0, 'RESUME': 1.0}
+               'CAPTURE': 4.0, 'VERIFY': 5.0, 'PACK': 2.0, 'RESUME': 1.0}
     bad = 0
     for s in icd:
         okmark = 'OK' if timeout[s] > icd[s] else '违反'

@@ -1,0 +1,35 @@
+{
+  "gains": {
+    "kp": 3.0,
+    "ki": 1.2,
+    "kd": 0.12
+  },
+  "deadband_px": 20.0,
+  "step_z1": {
+    "step_px": 353.4324137228407,
+    "overshoot_pct": 2.985,
+    "settling_time_s": 0.901,
+    "steady_error_px": 7.68,
+    "saturated_frac": 0.0,
+    "integral_frozen_frac": 0.125,
+    "samples": 40
+  },
+  "step_z3": {
+    "step_px": 1054.8023196804256,
+    "overshoot_pct": 1.019,
+    "settling_time_s": 1.202,
+    "steady_error_px": 8.446,
+    "saturated_frac": 0.0,
+    "integral_frozen_frac": 0.2,
+    "samples": 40
+  },
+  "step_z3_no_schedule": {
+    "step_px": 1054.8023196804256,
+    "overshoot_pct": 37.717,
+    "settling_time_s": 1.102,
+    "steady_error_px": 1.839,
+    "saturated_frac": 0.075,
+    "integral_frozen_frac": 0.175,
+    "samples": 40
+  }
+}

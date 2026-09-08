@@ -121,6 +121,28 @@ def collect(cfg: Config, *, target_id: str, distance_m: float, zoom: float,
     return points, raw, world
 
 
+def _points_from(raw: list[dict], conf_floor: float):
+    """从 raw 记录重建标定点，只保留 confidence ≥ conf_floor 的读数。
+
+    用于并列报一个「剔除算法自报低置信度读数」的口径。**它不替代主指标**——
+    方案书 §9.3 的口径是所有有效读数一视同仁，那个数照常算、照常报。
+    """
+    from collections import OrderedDict
+    groups: "OrderedDict[float, list[float]]" = OrderedDict()
+    for r in raw:
+        if not r.get("ok"):
+            continue
+        if float(r.get("confidence", 1.0)) < conf_floor:
+            continue
+        groups.setdefault(float(r["nominal"]), []).append(float(r["angle_deg"]))
+    pts = []
+    for nom, angs in groups.items():
+        cp = CalibrationPoint(nominal_value=nom)
+        cp.angles_deg.extend(angs)
+        pts.append(cp)
+    return pts, list(groups.values())
+
+
 def _settle(ptz, timeout_s: float = 4.0) -> None:
     import time
     t0 = time.time()
@@ -253,10 +275,45 @@ def main() -> int:
                 for r in ok) if ok else float("nan")
     budget = error_budget(p_med)
 
+    # ---- 算法自报的低置信度读数
+    #
+    # **这一段不改主指标，只把口径摊开。** 标定按方案书 §9.3 是"五点各测 10 次取
+    # 最大偏差"，所有 ok 的读数一视同仁地进统计——上面那三个数就是这么算的，
+    # 不动。但运行时 fusion 并不这样：`_confidence()` 把 reading_confidence
+    # 折进总置信度（0.5×检测 + 0.5×读数），低置信度的读数会被压低分、进人工复核。
+    # 也就是说系统会对"算法自己都不确定"的读数区别对待，标定工具不会。
+    #
+    # 实测这个差别不是理论上的：43 轮标定共 2450 次读数里，6 次偏离该点中位
+    # 2.0–14.7°（占 0.245 %），单独把所在那一轮的重复性从 ~0.31 推到 3.7–5.5 % FS。
+    # **这 6 次算法当时就知道自己不确定**——它们的 confidence 全部 ≤ 0.879，
+    # 而 2444 次正常读数的 confidence 全部恰好是 1.000。同一批数据上
+    # axis_ratio 也能完全分开（正常 ≥0.9972，失控 ≤0.985），说明失效机制是
+    # 表盘椭圆拟合退化，不是读数环节的随机噪声。
+    #
+    # 所以这里并列报一个"剔除自报低置信度读数"的口径，让两个数都在记录里。
+    # 哪个口径写进验收由评审定；**不允许只报好看的那个**。
+    #
+    # 阈值 0.90 也是这批数据定的，不是拍的：取 0.90 能 6/6 全抓、零误伤，
+    # 取 0.60 只抓到 3/6。
+    conf_floor = float(cfg.get("perception.reading.confidence_floor", 0.90))
+    low = [r for r in ok if float(r.get("confidence", 1.0)) < conf_floor]
+    res_hi = None
+    if low:
+        pts_hi = _points_from(raw, conf_floor)
+        if all(len(g) >= 2 for g in pts_hi[1]):
+            res_hi = calibrate(pts_hi[0], range_min=float(pri["range_min"]),
+                               range_max=float(pri["range_max"]))
+
     print()
     print(res.report())
     print("基本误差  %.3f %% FS   (限值 0.5)  %s"
           % (basic, "合格" if basic <= 0.5 else "超差"))
+    if low:
+        print("\n低置信度读数  %d / %d 次 confidence < %.2f（算法自报不确定）"
+              % (len(low), len(ok), conf_floor))
+        if res_hi is not None:
+            print("剔除后重复性  %.3f %% FS（主指标仍以上面的 %.3f 为准）"
+                  % (res_hi.repeatability_pct_fs, res.repeatability_pct_fs))
     print("像素密度  %.1f px      理论合成误差 %.3f %% FS"
           % (p_med, budget["total_pct_fs"]))
 
@@ -281,6 +338,17 @@ def main() -> int:
         f.write("| 中位像素密度 | %.1f px |\n" % p_med)
         f.write("\n## 五点读数标定\n\n```\n%s\n基本误差  %.3f %% FS\n```\n"
                 % (res.report(), basic))
+        if low:
+            f.write("\n> **本轮有 %d / %d 次读数的 `confidence` 低于 %.2f**"
+                    "（算法自报不确定）。上面三个指标按方案书 §9.3 口径把它们"
+                    "一并算了进去；" % (len(low), len(ok), conf_floor))
+            if res_hi is not None:
+                f.write("剔除这些读数后重复性为 **%.3f %% FS**。"
+                        "**主指标仍以上面的 %.3f 为准**，"
+                        "并列这个数只是为了让口径差可见。\n"
+                        % (res_hi.repeatability_pct_fs, res.repeatability_pct_fs))
+            else:
+                f.write("剔除后某些标定点不足 2 次读数，无法重算。\n")
         f.write("\n| 标称读数 | 平均转角 | 极差 | 残差 %% FS |\n|---|---|---|---|\n")
         for p_, r_ in zip(points, res.residuals_pct_fs):
             f.write("| %.4g | %+.3f° | %.3f° | %+.3f |\n"

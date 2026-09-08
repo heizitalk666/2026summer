@@ -19,9 +19,12 @@ from __future__ import annotations
 from typing import Final
 
 # ---------------------------------------------------------------- 白名单
-#: ICD §4.1 六条指令。PTZ_RATE 是差异清单 A1 的推荐增补（云台速率闭环），
+#: ICD v2.0 §4.1 七条指令。PTZ_RATE 由 D3 决议 A1 增补（云台速率闭环），
 #: 它的"是否改变车辆运动"为否，不触碰底盘安全边界。是否接受由
 #: gateway.node 按 enable_ptz_rate 开关决定，但常量在这里定死。
+#:
+#: WHITELIST 仍只有六条：**开关关掉时 PTZ_RATE 必须被拒**，
+#: 这是"白名单增删要重新评审安全边界"那条规矩的落点。
 WHITELIST: Final[frozenset[str]] = frozenset({
     "PAUSE", "RESUME", "CREEP_FORWARD", "GOTO_OBSERVE", "PTZ_SET", "HEARTBEAT",
 })
@@ -48,6 +51,13 @@ PTZ_TILT_DPS: Final[tuple[float, float]] = (-40.0, 40.0)
 #: 没有它，mission 崩溃时云台会一直转到限位。
 PTZ_RATE_TTL_MS: Final[tuple[int, int]] = (100, 500)
 TIMEOUT_MS: Final[tuple[int, int]] = (1, 30000)
+#: 制动时延的验收指标（方案书 §9.3 / ICD §5.8）。
+#:
+#: **这是逻辑判据，不是 Schema 约束**（D3 决议 D1）。Schema 上限原来焊死在 100 ms，
+#: 结果真机制动慢到 150 ms 时，收到的不是"一条记录着超标的报文"，而是一条解析失败
+#: 的报文——恰好把最该留证的证据丢掉了，而那正是这个字段存在的唯一理由。
+#: 现在 Schema 放宽到 5000 ms 只挡物理上不可能的量级，超标由网关在这里判。
+BRAKE_LATENCY_LIMIT_MS: Final[int] = 100
 
 # ---------------------------------------------------------------- 枚举
 PAUSE_REASONS: Final[frozenset[str]] = frozenset({
@@ -108,6 +118,12 @@ SCHEMA_CROSSCHECK: Final[tuple[tuple[str, tuple, str, str], ...]] = (
      "control_command.schema.json", "$defs.ptzPar.properties.tilt_deg"),
     ("PTZ_ZOOM", PTZ_ZOOM,
      "control_command.schema.json", "$defs.ptzPar.properties.zoom"),
+    ("PTZ_PAN_DPS", PTZ_PAN_DPS,
+     "control_command.schema.json", "$defs.ratePar.properties.pan_dps"),
+    ("PTZ_TILT_DPS", PTZ_TILT_DPS,
+     "control_command.schema.json", "$defs.ratePar.properties.tilt_dps"),
+    ("PTZ_RATE_TTL_MS", PTZ_RATE_TTL_MS,
+     "control_command.schema.json", "$defs.ratePar.properties.ttl_ms"),
     ("TIMEOUT_MS", TIMEOUT_MS,
      "control_command.schema.json", "properties.timeout_ms"),
     ("PTZ_PAN_DEG", PTZ_PAN_DEG,

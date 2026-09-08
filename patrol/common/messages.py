@@ -57,8 +57,23 @@ def load_schema(msg_type: str) -> dict:
 
 
 @lru_cache(maxsize=None)
+def _registry():
+    """把五份 Schema 都注册进来，让跨文件 ``$ref`` 能离线解析。
+
+    差异清单 D3 让 ``evidence_package`` 的 ``l2_reading`` 去 ``$ref``
+    ``detection_event`` 里的完整定义。没有这份注册表，jsonschema 会去网络上取
+    ``https://patrol.local/...``——那是个不存在的域名，报文校验会在超时后抛
+    ``Unresolvable``。**校验路径上不能有网络依赖**，所以这里预先把每份 Schema
+    按它自己的 ``$id`` 注册。
+    """
+    from referencing import Registry, Resource
+    res = [Resource.from_contents(load_schema(mt)) for mt in SCHEMA_FILES]
+    return Registry().with_resources((r.id(), r) for r in res)
+
+
+@lru_cache(maxsize=None)
 def validator_for(msg_type: str) -> Draft202012Validator:
-    return Draft202012Validator(load_schema(msg_type))
+    return Draft202012Validator(load_schema(msg_type), registry=_registry())
 
 
 def validate(msg: dict, msg_type: str | None = None) -> dict:

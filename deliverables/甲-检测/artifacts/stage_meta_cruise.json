@@ -1,0 +1,12 @@
+{
+  "stage": "cruise",
+  "conf_threshold": 0.25,
+  "nms_iou": 0.5,
+  "model": "yolo11s.pt",
+  "metrics": {
+    "mAP50": 0.9948564533831411,
+    "mAP50_95": 0.7513403518746226,
+    "precision": 0.9967024636495196,
+    "recall": 0.9976199316908495
+  }
+}

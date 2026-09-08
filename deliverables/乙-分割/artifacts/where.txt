@@ -1,8 +1,13 @@
-# 太大不进版本库的产物放哪
-#
-# 一行一个，格式：<文件名>  <链接或路径>  <大小>  <sha256 前 8 位>
-# 例：
-# unet.onnx   https://pan.example.com/xxxx   47 MB   a1b2c3d4
-#
-# 留空表示还没交。
+U-Net 权重（太大，不进版本库，.gitignore 忽略 *.pt / *.onnx）
 
+  unet.pt    训练/runs/seg/unet.pt     （PyTorch 权重，31 MB，训练产物）
+  unet.onnx  训练/runs/seg/unet.onnx   （ONNX 导出，31 MB，接 onnx_seg.py 用）
+
+本机路径：
+  C:\Users\34393\Desktop\aaa\2026summer\training\runs\seg\unet.pt
+  C:\Users\34393\Desktop\aaa\2026summer\training\runs\seg\unet.onnx
+
+复现命令（在仓库根目录，需 torch + CUDA）：
+  python -m training.train_unet --data training/datasets/seg_combined --epochs 40
+
+需要分享时把这两个文件传到网盘，这里把链接替换成网盘地址即可。

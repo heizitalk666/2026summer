@@ -9,6 +9,7 @@ import time
 
 import pytest
 
+from patrol import SCHEMA_VERSION
 from patrol.common.clock import mono_ns
 from patrol.common.config import Config
 from patrol.mission.budget import build_budget
@@ -26,7 +27,7 @@ def det_event(*, is_suspect=True, track_id=7, stage="CRUISE", zoom=1.0,
               pose=(10.0, -3.18), pose_valid=True, conf=0.41, p=49.9,
               rule="CONF_BAND", cx=1200.0, cy=600.0):
     return {
-        "schema_version": "1.1.0", "msg_type": "DETECTION_EVENT", "seq": 1,
+        "schema_version": SCHEMA_VERSION, "msg_type": "DETECTION_EVENT", "seq": 1,
         "ts_mono_ns": mono_ns(), "ts_utc_ms": 1, "run_id": "20260901-093012-a7f3",
         "event_id": "3f2b9c14-7d5e-4a81-b0c6-2e9f1a4d8e77" if is_suspect else None,
         "stage": stage,
@@ -61,7 +62,7 @@ def status(*, chassis="MOVING", at_target=True, focus="LOCKED", kind="PERIODIC",
     会扫出画面），所以需要模拟扫转的用例要显式传 at_target=False。
     """
     return {
-        "schema_version": "1.1.0", "msg_type": "STATUS_REPORT", "seq": 1,
+        "schema_version": SCHEMA_VERSION, "msg_type": "STATUS_REPORT", "seq": 1,
         "ts_mono_ns": mono_ns(), "ts_utc_ms": 1, "run_id": "20260901-093012-a7f3",
         "report_kind": kind,
         "chassis": {"state": chassis, "speed_mps": 0.0, "path_progress": 0.3,

@@ -1,0 +1,18 @@
+{
+  "dataset": "training/datasets/seg_combined",
+  "split_method": "两个源各自独立按 val_frac 划分后直接合并，未跨源重新随机（合成 gen_synthetic val_frac=0.2，PaddleX prepare_dataset val_frac=0.15）。train_unet.py 读目录里已有的 train/val 划分。",
+  "images": {
+    "train": {"total": 594, "synthetic": 239, "paddlex": 355},
+    "val": {"total": 120, "synthetic": 61, "paddlex": 59}
+  },
+  "rois_needle": {
+    "_note": "IoU 在这批『含针 ROI』上算，与 train_unet.py collect_rois / train_segmenter crops_of 同一条切分逻辑；只保留 mask 含针(2)且短边>=24 的 ROI。",
+    "train": {"total": 465, "synthetic": 110, "paddlex": 355},
+    "val": {"total": 90, "synthetic": 31, "paddlex": 59}
+  },
+  "val_composition": {
+    "val_roi_paddlex_frac": 0.656,
+    "val_roi_synthetic_frac": 0.344,
+    "conclusion": "val 的 90 个含针 ROI 里 59 个来自 PaddleX 真实图（65.6%），31 个来自合成图。IoU 0.778 主要由真实图支撑，不是被容易的合成图抬高的。"
+  }
+}

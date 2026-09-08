@@ -3,9 +3,9 @@
 | | |
 |---|---|
 | 文档编号 | ICD-RK3576-PATROL |
-| 版本 | v1.0（M1 冻结版） |
+| 版本 | v2.0（D3 评审通过，接口重新冻结） |
 | 状态 | 待评审 → 冻结 |
-| 对应里程碑 | M1（D3）：四份 JSON Schema + 三个桩 + 驱动层抽象接口，全组评审通过 |
+| 对应里程碑 | M1（D3）：五份 JSON Schema + 三个桩 + 驱动层抽象接口，全组评审通过 |
 | 冻结日期 | D3 |
 | 适用范围 | 四人组全部代码分支，桩环境与真机环境共用同一套接口 |
 
@@ -45,8 +45,11 @@ D3 评审通过后，本文档定义的字段名、枚举值、指令白名单�
 |---|---|---|---|---|---|
 | IF-1 | `DetectionEvent` 感知事件 | `perception` → `mission` | ZeroMQ PUB/SUB，`ipc:///tmp/patrol_det` | 10 Hz（巡航）/ 按需（复核） | `detection_event.schema.json` |
 | IF-2 | `ControlCommand` 控制指令 | `mission` → `gateway` → 执行器 | ZeroMQ REQ/REP，`ipc:///tmp/patrol_cmd` | 事件驱动 + 5 Hz 心跳 | `control_command.schema.json` |
+| IF-2R | `CommandAck` 指令回执 | `gateway` → `mission` | 同 IF-2 的 REQ/REP 应答 | 每条指令一条 | `command_ack.schema.json` |
 | IF-3 | `StatusReport` 状态与安全上报 | `gateway` → `mission` / `perception` | ZeroMQ PUB/SUB，`ipc:///tmp/patrol_status` | 20 Hz 周期 + 事件插播 | `status_report.schema.json` |
 | IF-4 | `EvidencePackage` 证据包 | `uploader` → 云端 | MQTT v3.1.1（元数据）+ HTTPS PUT（大文件） | 每次复核一包 | `evidence_package.schema.json` |
+
+**编号是四个（IF-1~IF-4），Schema 是五份**（D3 决议 C7）。`CommandAck` 不单列接口编号是因为它是 IF-2 的应答半程，不是一条独立通路；但它有自己的 Schema 文件、自己的校验、自己的反例，所以份数是五。v1.0 的首页里程碑行与本表都写成「四份」，与 §10.1、§10.2、附录 D 的五份对不上，此处统一为五份。
 
 选 ZeroMQ 的理由：IPC 传输不占网络栈，PUB/SUB 天然支持一发多收（`StatusReport` 同时给 `mission` 和 `perception`），REQ/REP 强制每条指令必须有回执，正好匹配指令必须带 ACK 的要求。桩环境把 `ipc://` 换成 `tcp://` 就能跨机调试，代码不用改。
 
@@ -114,7 +117,7 @@ D3 评审通过后，本文档定义的字段名、枚举值、指令白名单�
 | `seq` | uint32，按通道各自递增，溢出回绕 | 各发送方 | 检测丢包 |
 | `waypoint_id` | `WP-<两位序号>` | 标定阶段人工分配 | 整个项目 |
 
-`event_id` 是串起四份 Schema 的主键。同一次复核里，`DetectionEvent`、由它触发的所有 `ControlCommand`、期间的 `StatusReport`、最终的 `EvidencePackage`，全部携带同一个 `event_id`。事后排查问题时按 `event_id` 过滤日志，能拿到完整的一条时间线。
+`event_id` 是串起五份 Schema 的主键。同一次复核里，`DetectionEvent`、由它触发的所有 `ControlCommand`、期间的 `StatusReport`、最终的 `EvidencePackage`，全部携带同一个 `event_id`。事后排查问题时按 `event_id` 过滤日志，能拿到完整的一条时间线。
 
 ### 2.3 坐标系
 
@@ -160,7 +163,7 @@ D3 评审通过后，本文档定义的字段名、枚举值、指令白名单�
 
 | 字段 | 类型 | 必填 | 取值 | 说明 |
 |---|---|---|---|---|
-| `schema_version` | string | 是 | `"1.0.0"` | semver |
+| `schema_version` | string | 是 | `"2.0.0"` | semver |
 | `msg_type` | string | 是 | `"DETECTION_EVENT"` | 常量 |
 | `seq` | uint32 | 是 | | 通道内递增 |
 | `ts_mono_ns` | int64 | 是 | | 该帧图像的采集时刻，不是推理完成时刻 |
@@ -197,6 +200,12 @@ D3 评审通过后，本文档定义的字段名、枚举值、指令白名单�
 | `image_w` / `image_h` | uint16 | `1920` / `1080` | |
 
 `context.ptz.hfov_deg` 是**当前变焦倍率下**的实际水平视场角，不是广角端的 60°。像素密度公式里的 $\theta$ 取这个值，或者取广角端 $\theta_0$ 与 `zoom` 一起代入，两种算法必须在实现里二选一并注释清楚，不能混用。
+
+**θ 冻结在 60°，但附带实测复核条款**（D3 决议 C5）。方案书内部对这个数就不自洽：§3.4 选型表写 60°–20°，§4.1.3 由它自己给的 $f = 4$ mm / $w = 5.37$ mm 算出来是 **67°–25°**，而 §5.3 全部按 60° 代入。两份文档现状一致地用 60°，所以按 60° 冻结改动最小。
+
+**代价必须写明**：若真值是 67°，巡航像素密度从 49.9 px 掉到 43.5 px，所需变焦倍率 $z_{req}$ 从 2.41 涨到 2.76——镜头只有 3×，余量从 25 % 压到 8 %，基本没有了；真机距离上限 $d_{\max}$ 从 6 m 收到 5 m，桩上从 4.16 m 收到 3.63 m。完整重算见《一致性差异清单》§6.2，脚本 `docs/recheck_numbers.py` 可复现。
+
+因此本 ICD 增加一条硬性条款：**§9.2.3 的像素密度标定实测出的 θ 与 60° 偏差超过 3° 时，$d_{\max}$ 与路线标定规范必须按实测值重算，并通报全组。** 这不是建议，是冻结的前提——θ 是像素密度判据的支点，支点错了整条「必须停车变焦」的立论就要重新算。
 
 #### `detections[]`
 
@@ -271,7 +280,7 @@ $$p = \frac{W \cdot D \cdot z}{2d\tan(\theta/2)}$$
 | $D$ | `detections[].target_size_m` | 目标关键特征的物理尺寸，m |
 | $z$ | `context.ptz.zoom` | 光学变焦倍率 |
 | $d$ | `detections[].est_distance_m` | 目标距离，m |
-| $\theta$ | 广角端水平视场角 60° | 常量，配置在 `camera.yaml` |
+| $\theta$ | 广角端水平视场角 60° | 常量，配置在 `camera.yaml`。**取值依据见下方 C5 条款** |
 
 标定基准值（写进网关与状态机的判定阈值时以此为准）：
 
@@ -310,7 +319,7 @@ $$p = \frac{W \cdot D \cdot z}{2d\tan(\theta/2)}$$
 
 ```json
 {
-  "schema_version": "1.0.0",
+  "schema_version": "2.0.0",
   "msg_type": "DETECTION_EVENT",
   "seq": 18422,
   "ts_mono_ns": 884213556000000,
@@ -365,7 +374,7 @@ $$p = \frac{W \cdot D \cdot z}{2d\tan(\theta/2)}$$
 
 ### 4.1 白名单
 
-协议只承认六条指令。网关收到任何不在下表中的 `command` 值，一律拒绝并上报 `SafetyEvent`，不做任何解释性处理。
+协议只承认七条指令。网关收到任何不在下表中的 `command` 值，一律拒绝并上报 `SafetyEvent`，不做任何解释性处理。
 
 | 指令 | 语义 | 参数 | 是否改变车辆运动 |
 |---|---|---|---|
@@ -374,11 +383,32 @@ $$p = \frac{W \cdot D \cdot z}{2d\tan(\theta/2)}$$
 | `CREEP_FORWARD` | 沿当前路径小步前移 | `distance_m` | 是（受限位移） |
 | `GOTO_OBSERVE` | 前往已标定的观察位 | `waypoint_id`, `tolerance_m` | 是（路径由底盘规划） |
 | `PTZ_SET` | 设定云台姿态与变焦 | `pan_deg`, `tilt_deg`, `zoom`, `speed` | 否 |
+| `PTZ_RATE` | 设定云台角速度（速率闭环） | `pan_dps`, `tilt_dps`, `ttl_ms` | 否 |
 | `HEARTBEAT` | 心跳 | `mission_state` | 否 |
+
+**`PTZ_RATE` 是 D3 决议 A1 增补的**（v1.0 只有六条）。方案书 §6.3 整章的云台 PID
+——控制量为方位角速度 ω、增益调度、抗积分饱和、阶跃响应曲线——在只有 `PTZ_SET`
+的位置式接口上全部产生不出来：开环指向没有超调，也没有阶跃响应可画。而 §9.3 的
+超调量 ≤10 %、调节时间 ≤1.5 s、稳态误差 ≤20 px 三项是要验收的。
+
+它的「是否改变车辆运动」为否，**不触碰底盘安全边界**，这是它能进白名单的前提。
+两条约束：
+
+- `ttl_ms ∈ [100, 500]` 是**自失效时长**。超过它没有新指令刷新，网关把云台速度
+  归零。没有这一条，`mission` 崩溃时云台会一直转到限位
+- 网关按 `gateway.enable_ptz_rate` 决定是否接受。**开关关掉时必须拒绝**——
+  Schema 认得这条指令不等于网关接受它，「增删白名单要重新评审安全边界」这条
+  规矩的落点在网关，不在 Schema
+
+**`CREEP_FORWARD` 是首版预留、无状态发出的**（D3 决议 B4）。它在白名单里，网关
+也校验它的 `distance_m`，但十状态机里没有任何一条转移会发出它——首版的复核靠
+云台变焦，不靠挪车。保留它是因为「站得太远导致变焦到 3× 仍不够」这个场景真实
+存在，删掉再加回来要重走白名单评审。**没有状态发出它，就没有对应的状态转移分支
+需要补**，这一条在评审时容易被误当成缺陷。
 
 协议中不存在转向角、轮速、扭矩、制动力、目标速度这类量。AI 侧没有任何字段可以直接指定车怎么动，只能表达"想停"和"想去某个已标定的点"。怎么停、怎么走，由底盘自己决定。
 
-这条约束的实现后果需要在评审时确认：底盘必须提供任务级接口（接受"去 WP-07"这样的指令）。若采购到的底盘只有速度接口，硬件组要在底盘侧写一层适配，把任务级指令翻译成速度指令，这层适配跑在底盘 MCU 上，不在 RK3576 上。这是待拍板事项之一，在 D3 评审前必须有结论，否则本接口无法冻结。
+这条约束的实现后果**已经有结论**：读过底盘固件（`XiaoChe_APM32`）之后确认，本车只有 `(vx, vy, ω)` 速度级接口，没有任何任务级接口，也没有串口指令通路（`Source/User/` 下 `grep USART|UART` 零命中，唯一控制入口是 PS2 手柄）。因此适配层必须写在 APM32 上，不在 RK3576 上——这不再是「待硬件组确认」，而是待我们自己实现。逐条见 `docs/底盘固件评审.md` §7 与 `docs/底盘串口协议.md`。
 
 ### 4.2 指令报文
 
@@ -470,7 +500,7 @@ $$p = \frac{W \cdot D \cdot z}{2d\tan(\theta/2)}$$
 
 ```json
 {
-  "schema_version": "1.0.0",
+  "schema_version": "2.0.0",
   "msg_type": "CONTROL_COMMAND",
   "cmd_id": "b81e0f42-6c33-4d90-9a15-0f7c2e5b3a88",
   "seq": 2077,
@@ -487,7 +517,7 @@ $$p = \frac{W \cdot D \cdot z}{2d\tan(\theta/2)}$$
 
 ```json
 {
-  "schema_version": "1.0.0",
+  "schema_version": "2.0.0",
   "msg_type": "COMMAND_ACK",
   "cmd_id": "b81e0f42-6c33-4d90-9a15-0f7c2e5b3a88",
   "ts_mono_ns": 884215903400000,
@@ -503,7 +533,7 @@ $$p = \frac{W \cdot D \cdot z}{2d\tan(\theta/2)}$$
 
 ```json
 {
-  "schema_version": "1.0.0",
+  "schema_version": "2.0.0",
   "msg_type": "COMMAND_ACK",
   "cmd_id": "c4a7d011-2e88-4f5b-8c30-9b1e6a2d7f45",
   "ts_mono_ns": 884216104000000,
@@ -627,7 +657,7 @@ $$p = \frac{W \cdot D \cdot z}{2d\tan(\theta/2)}$$
 
 ```json
 {
-  "schema_version": "1.0.0",
+  "schema_version": "2.0.0",
   "msg_type": "STATUS_REPORT",
   "seq": 41288,
   "ts_mono_ns": 884219337000000,
@@ -672,15 +702,19 @@ evidence/<run_id>/<event_id>/
 ├── manifest.json          IF-4 报文本体
 ├── cruise.jpg             一级检出的原始帧（1920×1080，含检出框）
 ├── cruise_raw.jpg         同一帧无标注原图，用于重训练
-├── verify_01.jpg          复核抓拍第 1 帧
+├── verify_01.jpg          主视角复核抓拍第 1 帧
 ├── verify_02.jpg          第 2 帧
 ├── verify_03.jpg          第 3 帧
+├── verify_aux_l.jpg       A3 条件式辅视角，左偏 15°（仅条件路径）
+├── verify_aux_r.jpg       右偏 15°（仅条件路径）
 ├── verify_roi.jpg         L2 读数所用 ROI 裁图
 ├── anomaly_heat.png       L3 热力图，无 L3 时缺省
 └── meta.jsonl             复核期间全部 StatusReport 与 ACK 的原始流水
 ```
 
 抓三帧而不是一帧：云台停稳后仍有残余抖动，3 帧里挑最清晰的一帧送二级模型，成本是 0.6 s，收益是显著降低运动模糊导致的复核失败。三帧全部入包，因为丢弃的两帧对分析复核失败原因有用。
+
+**辅视角两张只在条件路径上出现**（A3），`role` 为 `VERIFY_FRAME_AUX`，与主视角的 `VERIFY_FRAME` 分开——它们解决的是两个不同问题：连拍抗运动模糊，辅视角抗镜面高光。合成一个角色会让「这次复核为什么慢了 1.5 s」无从查起。
 
 `meta.jsonl` 是本次复核的完整回放数据。有了它，一次线上复核失败可以在桩环境里逐帧重放，不用去现场复现。单次约 200 KB，不构成负担。
 
@@ -755,7 +789,7 @@ evidence/<run_id>/<event_id>/
 
 ```json
 {
-  "schema_version": "1.0.0",
+  "schema_version": "2.0.0",
   "msg_type": "EVIDENCE_PACKAGE",
   "run_id": "20260901-093012-a7f3",
   "event_id": "3f2b9c14-7d5e-4a81-b0c6-2e9f1a4d8e77",
@@ -819,21 +853,37 @@ evidence/<run_id>/<event_id>/
 | 状态 | 发出 | 等待条件 | 预算 | 超时 | 超时动作 |
 |---|---|---|---|---|---|
 | `CRUISE` | 仅 `HEARTBEAT` | `DetectionEvent.suspect.is_suspect = true` | — | — | — |
-| `SUSPECT` | 无 | 三重抑制与预算检查通过 | 0.2 s | 0.5 s | 回 `CRUISE` |
+| `SUSPECT` | 无 | 连续三帧确认 + 三重抑制与预算检查通过 | 0.3 s | 0.5 s | 回 `CRUISE` |
 | `HALT_REQ` | `PAUSE(VERIFY_REQUEST)` | `chassis.state = STOPPED` | 2.0 s | 4.0 s | `ABORT` |
 | `AIM` | `PTZ_SET(pan,tilt,zoom=1)` | `ptz.at_target = true` | 1.5 s | 3.0 s | `ABORT` |
-| `ZOOM` | `PTZ_SET(pan,tilt,zoom=3)` | `at_target` 且 `focus_state = LOCKED` | 1.2 s | 2.5 s | `ABORT` |
-| `CAPTURE` | 无（走 `ICamera`） | 3 帧抓取完成 | 0.6 s | 1.5 s | `ABORT` |
+| `ZOOM` | `PTZ_SET(pan,tilt,zoom=z_cmd)` | `at_target` 且 `focus_state = LOCKED` | 1.5 s | 2.5 s | `ABORT` |
+| `CAPTURE` | 无（走 `ICamera`；条件路径另发 `PTZ_SET` 偏转） | 主视角 3 帧完成；判定需辅视角时，三视角各 3 帧完成 | 0.6 s（条件路径 2.1 s） | 4.0 s | `ABORT` |
 | `VERIFY` | 无（走 `perception`） | 收到 `stage = VERIFY` 的 `DetectionEvent` | 2.5 s | 5.0 s | `ABORT` |
 | `PACK` | 无（走 `uploader`） | manifest 落盘完成 | 0.5 s | 2.0 s | 记 `PACK_FAILED`，仍转 `RESUME` |
 | `RESUME` | `PTZ_SET(0,0,1)` + `RESUME` | `chassis.state = MOVING` | 0.3 s | 1.0 s | 重发一次，仍失败则 `ABORT` |
 | `ABORT` | `PTZ_SET(0,0,1)` + `RESUME` | `chassis.state = MOVING` | — | 1.0 s | 上报 `RESUME_FAILED`，由看门狗兜底 |
 
-$$T_r = 0.2 + 2.0 + 1.5 + 1.2 + 0.6 + 2.5 + 0.5 + 0.3 = 8.8\ \text{s}$$
+$$T_r = 0.3 + 2.0 + 1.5 + 1.5 + 0.6 + 2.5 + 0.5 + 0.3 = 9.2\ \text{s}$$
 
 每个状态都有独立超时且超时动作都指向 `ABORT` 或 `CRUISE`，状态图里不存在没有出边的节点，也不存在只能靠外部干预才能离开的状态。
 
 `AIM` 与 `ZOOM` 拆成两条 `PTZ_SET` 而不是一条：先在广角端把目标转到画面中心，再变焦。反过来做的话，变焦后视场只有 20° 左右，转向时目标很容易划出画面，重新找回来的代价远大于多发一条指令。
+
+**`ZOOM` 下发的是按需算出的 `z_cmd`，不是固定的 3×**（D3 决议 C4，采纳方案书 §6.3.5）：
+
+$$z\_cmd = \mathrm{clip}\left(z_{cur} \cdot \frac{p_{target}}{p_{cur}},\ 1,\ 3\right)$$
+
+固定 3× 对近距离目标会过度放大导致目标出框——方案书 §9.4 的问题预案里「变焦后目标丢失」写的就是这个。校验不过时重试一次，因此预算由 1.2 s 放宽到 1.5 s。
+
+**`SUSPECT` 需要连续三帧确认**（D3 决议 C10，取方案书 §6.4 的三帧口径）。原预算 0.2 s 是按 10 fps 两帧算的，三帧需要 0.3 s。
+
+**`CAPTURE` 的三视角是条件式的，不是无条件的**（D3 决议 A3）。默认走单视角连拍 3 帧（0.6 s）；当质量评价判定主视角存在高光遮挡（`detections[].quality.highlight`）或首次读数置信度低于阈值时，追加左右各 ±15° 两个辅视角，`CAPTURE` 延长到 2.1 s，并做三视角一致性判定（读数极差写进 `after.multiview_spread`，超过 0.5 % FS 判本次测量不可信）。
+
+方案书 §4.3.1 把表盘玻璃的镜面反射列为本场景最主要的光学干扰源，抑制手段正是「改变云台角度重新拍摄」——这条不能删；但它按定义就是条件触发的，无条件付 2.1 s 会让 $N_{\max}$ 从 21 掉到 18，用 14 % 的复核能力去换一个只在高光时用得上的手段。
+
+**超时因此由 1.5 s 放宽到 4.0 s**（连锁 C1）：条件路径要 2.1 s，1.5 s 会让走辅视角的复核必然超时进 `ABORT`。
+
+统计 `CAPTURE` 耗时时要按是否走辅视角分组，`timeline` 里它是双峰分布，直接取均值没有意义。
 
 `ABORT` 的出口动作和 `RESUME` 完全一致。区别只在于是否产出证据包：`ABORT` 时 `manifest.abort` 非空，记录中止在哪个状态、原因是什么，`gain.verify_success = false`。中止的复核照样打包上传，因为复核失败的样本对调参最有价值。
 
@@ -855,9 +905,15 @@ $$T_r = 0.2 + 2.0 + 1.5 + 1.2 + 0.6 + 2.5 + 0.5 + 0.3 = 8.8\ \text{s}$$
 
 $$N_{\max} = \left\lfloor \frac{T_{\max} - L/v}{T_r} \right\rfloor$$
 
-标定算例：$L = 200$ m，$v = 0.5$ m/s，$T_{\max} = 600$ s，$T_r = 8.8$ s
+标定算例：$L = 200$ m，$v = 0.5$ m/s，$T_{\max} = 600$ s，$T_r = 9.2$ s
 
-$$N_{\max} = \left\lfloor \frac{600 - 400}{8.8} \right\rfloor = \lfloor 22.7 \rfloor = 22$$
+$$N_{\max} = \left\lfloor \frac{600 - 400}{9.2} \right\rfloor = \lfloor 21.7 \rfloor = 21$$
+
+> **这是算例，不是本车的实际配置。** 读了底盘固件之后才知道实车最高 0.3 m/s
+> （`MAX_SPD 0.1` × 三档，见 `docs/底盘固件评审.md` §6），200 m 路线光巡航就要
+> 667 s，超过 600 s 上限，$N_{\max} = 0$。`configs/system.yaml` 因此按
+> 60 m / 0.25 m/s 标定，$N_{\max} = 39$。`validate.py` 第 4 项同时校验算例与
+> 当前配置两套数，后者要求 $N_{\max} > 0$。
 
 预算耗尽后，`suspect.is_suspect` 仍然照常置位，但 `suppressed_by = BUDGET_EXHAUSTED`，事件进入顺延队列，按 `priority` 排序，下一轮巡检优先处理。
 
@@ -1184,7 +1240,7 @@ def build_drivers(cfg: dict) -> tuple[IChassis, IPTZ, ICamera, ILocalizer]:
 
 `stop_delay_ms` 的下限 1500 ms 与 `HALT_REQ` 的 2000 ms 预算之间只有 500 ms 余量，上限 2500 ms 已经超出预算。这是故意的：预算是均值意义上的，超出预算但不超出 4000 ms 超时的情况必须在桩上出现，否则没人会去测"复核偶尔慢一点会怎样"。
 
-`ack_drop_rate = 0.02` 意味着大约每 50 条指令丢一条。一轮巡检 22 次复核、每次 4 条指令，将近 90 条，一轮里大概率会丢一条。状态机必须能扛住，扛不住就会在 M2 的"连续 3 次触发"上翻车。
+`ack_drop_rate = 0.02` 意味着大约每 50 条指令丢一条。一轮巡检 21 次复核、每次 4 条指令，八十多条，一轮里大概率会丢一条。状态机必须能扛住，扛不住就会在 M2 的"连续 3 次触发"上翻车。
 
 `ESTOP_PRESSED` 保留 5% 的概率，因为它是唯一不能自恢复的安全事件。这条路径如果不在桩上跑过，真机上第一次按急停就是现场事故。
 
@@ -1260,7 +1316,7 @@ $$p_{stub} = p \cdot k = \frac{W \cdot D \cdot z}{2d\tan(\theta/2)} \cdot \min\l
 1. 五份 Schema 自身是否是合法的 Draft 2020-12
 2. 抽取本文档所有 `json` 代码块，按 `msg_type` 找到对应 Schema 并校验
 3. 复核像素密度算例（49.9 / 149.6 / 120.0 px，$z_{req}$，$d_{\max}$，桩的 $d_{\max}$）
-4. 复核时序预算加总是否等于 8.8 s，$N_{\max}$ 是否等于 22
+4. 复核时序预算加总是否等于 9.2 s，$N_{\max}$ 是否等于 21
 5. 检查每个状态的超时是否都大于其预算
 6. 比对附录 D 内嵌的 Schema 与 `schemas/` 下的文件是否逐字节一致，防止文档与代码各改各的
 7. 跑九条反例，确认越界指令、协议外参数、自相矛盾的字段组合都被 Schema 拦下
@@ -1291,7 +1347,7 @@ python3 validate.py
 D3 评审前这个脚本必须全绿，输出：
 
 ```
-PASS  Schema 5 份、正例 6 条、反例 9 条、内嵌副本一致、算例与预算全部自洽
+PASS  Schema 5 份、正例 6 条、反例 11 条、内嵌副本一致、算例与预算全部自洽
 ```
 
 建议接进 CI，每次改 Schema 自动跑一遍。
@@ -1303,13 +1359,14 @@ PASS  Schema 5 份、正例 6 条、反例 9 条、内嵌副本一致、算例�
 **接口定义**
 
 - [ ] 五份 Schema 文件齐全，`validate.py` 全绿
-- [ ] 四条接口的字段表与 Schema 逐字段对应，没有"文档有 Schema 没有"或反过来的情况
+- [ ] 四条接口（五份 Schema）的字段表与 Schema 逐字段对应，没有「文档有 Schema 没有」或反过来的情况
 - [ ] 每条接口至少一条示例报文，且能通过校验
 - [ ] 附录 B 的枚举全集与各 Schema 内的 `enum` 一致
 
 **安全边界**
 
-- [ ] 白名单六条指令，协议里确认不存在转向角、轮速、扭矩、制动力、目标速度
+- [ ] 白名单七条指令（含决议 A1 增补的 `PTZ_RATE`），协议里确认不存在转向角、轮速、扭矩、制动力、目标速度
+- [ ] `PTZ_RATE` 在 `gateway.enable_ptz_rate` 关闭时被拒（回归见 `tests/test_gateway.py`）
 - [ ] 网关的参数范围表已硬编码在网关源码里，评审时打开源码核对，不接受"在配置文件里"
 - [ ] 越界处理是拒绝不是截断
 - [ ] 心跳 5 Hz / 超时 1500 ms / 超时动作为 `RESUME`，三项在网关代码里可见
@@ -1329,13 +1386,15 @@ PASS  Schema 5 份、正例 6 条、反例 9 条、内嵌副本一致、算例�
 - [ ] `ptz_stub` 的有效像素比 $k = \min(1, 2/z)$ 已在代码里实现，桩上 $d_{\max} = 4.16$ m 已写进标定素材要求
 - [ ] `pose_stub` 的失锁注入能触发 `POSE_INVALID` 抑制
 
-**未决事项**
+**未决事项**（D3 已处理两条）
 
-- [ ] 底盘是否提供任务级接口，已有结论（这条不确认，IF-2 无法冻结）
-- [ ] 云台变焦是否达到 3× 光学，已有结论（这条不确认，像素密度判据失去支点）
-- [ ] 首版缺陷类别是否收窄到 3 类，已有结论（影响附录 B.1 的枚举范围）
+- [x] ~~底盘是否提供任务级接口~~ → **不提供**。读固件确认只有 `(vx, vy, ω)` 速度级接口，适配层写在 APM32 上（§4.1、`docs/底盘固件评审.md` §7）
+- [x] ~~首版缺陷类别是否收窄到 3 类~~ → **收窄，且换一组**：压力表 / 指示灯 / 开关分合位（决议 A2，附录 B.1）
+- [ ] 云台变焦是否达到 3× 光学，**仍未确认**（这条不确认，像素密度判据失去支点）
+- [ ] **A3 条件式辅视角的实现**：本 ICD §7.2 定义了条件路径，`files[].role` 的 `VERIFY_FRAME_AUX` 与 `snapshot.multiview_spread` 也已冻结，但**上位机侧没有代码产出它们**（`mission.capture.mode` 是死配置）。接口不必再改，欠的是实现——补的时候要跨进程：mission 判定 → 经网关下发 ±15° `PTZ_SET` → perception 抓帧 → 回传读数算极差
+- [ ] θ 的实测值（决议 C5 新增）：§9.2.3 标定出的实测 θ 与 60° 偏差是否在 3° 以内
 
-后两条未决事项直接决定接口能不能冻结。若云台只能做到 2× 光学，$p$ 在 5 m 处只有 99.8 px，达不到 120 px 的读数下限，要么把巡检位距离压到 4.2 m 以内，要么放弃指针表的自动读数改为只抓图人工判读。这是方案层面的改动，不是接口层面能兜住的，需要在 D3 之前定下来。
+云台那条直接决定接口能不能冻结。若只能做到 2× 光学，$p$ 在 5 m 处只有 99.8 px，达不到 120 px 的读数下限，要么把巡检位距离压到 4.2 m 以内，要么放弃指针表的自动读数改为只抓图人工判读。这是方案层面的改动，不是接口层面能兜住的。**硬件不到位期间，系统按 3× 的桩参数运行，这一条在答辩材料里如实标注为「未验证」。**
 
 ---
 
@@ -1364,18 +1423,22 @@ PASS  Schema 5 份、正例 6 条、反例 9 条、内嵌副本一致、算例�
 
 | 枚举值 | 含义 | `severity` | 首版是否纳入 |
 |---|---|---|---|
-| `PRESSURE_GAUGE` | 压力表（读数） | 0.70 | 建议纳入 |
-| `INDICATOR_LIGHT` | 指示灯（状态） | 0.50 | 建议纳入 |
-| `OIL_LEAK` | 渗漏油 | 0.90 | 建议纳入 |
+| `PRESSURE_GAUGE` | 压力表（读数） | 0.70 | **首版纳入** |
+| `INDICATOR_LIGHT` | 指示灯（状态） | 0.50 | **首版纳入** |
+| `SWITCH_HANDLE` | 开关分合位 | 0.80 | **首版纳入** |
+| `OIL_LEAK` | 渗漏油 | 0.90 | 二期 |
 | `OIL_LEVEL_GAUGE` | 油位计 | 0.60 | 二期 |
-| `SWITCH_HANDLE` | 开关把手位置 | 0.80 | 二期 |
 | `INSULATOR_BREAK` | 绝缘子破损 | 0.95 | 二期 |
 | `RUST_CORROSION` | 锈蚀 | 0.40 | 二期 |
 | `FOREIGN_OBJECT` | 异物 | 0.60 | 二期 |
 | `DOOR_OPEN` | 柜门未闭合 | 0.50 | 二期 |
 | `CABLE_LOOSE` | 接线松动 | 0.85 | 二期 |
 
-首版三类的挑选依据：一个走 L2 读数通路（压力表）、一个走 L2 分类通路（指示灯）、一个走纯 L1 检测通路（渗漏油）。三类各自打通一条链路，比十类都做半吊子更能证明架构成立。这也正好对应待拍板事项里"收窄到 3 类"的建议。
+首版三类的挑选依据：一个走 L2 读数通路（压力表）、一个走 L2 分类通路（指示灯）、一个走状态判别通路（开关分合位）。三类各自打通一条链路，比十类都做半吊子更能证明架构成立。
+
+**D3 决议 A2：`OIL_LEAK` 换成 `SWITCH_HANDLE`。** v1.0 选的是渗漏油，方案书表 2-2 选的是开关分合位，两份文档挑的不是同一组。取方案书那一组，理由是数据可得性：渗漏油几乎没有公开标注数据，室内配电室的更少，选它等于把首版的关键路径押在一份拿不到的数据集上；开关分合位则可以用现有渲染器构造，且它的验收指标（识别率 ≥99 %，方案书表 2-2）比读数类更容易讲清楚。
+
+让出来的「纯 L1 检测通路」由 L3 未知异常检测承接（B1）——非监督，只用正常样本，正好绕开同一个数据可得性约束。`configs/system.yaml` 的 `first_release_classes` 与 `patrol/scene/gauges.py` 已按本决议实现。
 
 Schema 里的 `enum` 保留全部十类，收窄只在训练与验收层面执行。这样二期加类别不需要改接口。
 
@@ -1422,16 +1485,47 @@ Schema 里的 `enum` 保留全部十类，收窄只在训练与验收层面执�
 
 | 版本 | 日期 | 变更 | 评审 |
 |---|---|---|---|
-| v1.0 | D3 | 首版，M1 冻结 | 待评审 |
+| v1.0 | D3 | 首版，M1 冻结 | 已被 v2.0 取代 |
+| v2.0 | D3 | **D3 评审决议全部落地，接口重新冻结**（详见下表） | 通过 |
+
+### v1.0 → v2.0 逐条
+
+| 决议 | 改了什么 | 版本影响 |
+|---|---|---|
+| A1 | 白名单增 `PTZ_RATE`（`pan_dps` / `tilt_dps` / `ttl_ms`），`IPTZ` 增 `set_rate()` | 增删白名单指令，已重新评审安全边界 |
+| A2 | 首版三类 `OIL_LEAK` → `SWITCH_HANDLE`（附录 B.1） | 仅收窄口径，枚举全集不变 |
+| A3 | `CAPTURE` 改条件式三视角，`files[].role` 增 `VERIFY_FRAME_AUX`，`after` 增 `multiview_spread` | 新增枚举值 + 新增可选字段 |
+| A4 | `detections[].quality` 四项指标，`trigger_rule` 增 `QUALITY_LOW` | 新增可选字段 + 新增枚举值 |
+| B3 | `files[].role` 增 `CRUISE_VIDEO` | 新增枚举值 |
+| B4 | `CREEP_FORWARD` 标注「首版预留、无状态发出」 | 仅说明文字 |
+| C1 | 状态超时以 ICD 为准；`CAPTURE` 超时 1.5 → 4.0 s（A3 连锁） | 数值 |
+| C4 | `ZOOM` 改按需 `z_cmd`，预算 1.2 → 1.5 s | 数值 |
+| C7 | Schema 份数口径统一为五份，§1.2 补 `CommandAck` 行 | 仅口径 |
+| C10 | `SUSPECT` 三帧确认，预算 0.2 → 0.3 s | 数值 |
+| C4+C10 | $T_r$ 8.8 → 9.2 s，$N_{\max}$ 22 → 21 | 数值 |
+| C5 | θ 冻结 60°，新增「实测偏差 >3° 须重算」硬条款 | 新增条款 |
+| **D1** | `brake_latency_ms` 上限 100 → 5000 ms，验收判定移到网关 | **修改字段范围 → 主版本 +1** |
+| D2 | `command_ack` 增 `PREEMPTED` 的 if/then | 收紧约束 |
+| **D3** | `evidence_package.l2_reading` 跨文件 `$ref` 复用完整定义 | **修改字段类型 → 主版本 +1** |
+| D4 | 附录 D 比对由「逐字节」改语义比对，并改由脚本生成 | 校验方式 |
+| D5 | `validate.py` 增第 8 项：网关常量 ↔ Schema 范围交叉比对 | 校验方式 |
+
+**报文 `schema_version` 因此从 `1.1.0` 升到 `2.0.0`。** 按 §0 的规则，D1 改的是字段范围、D3 改的是字段类型，两条都是主版本 +1，代价就是「三个桩同步改」——本仓库里桩统一从 `patrol.SCHEMA_VERSION` 取值，改一处即可，但**接收方只比主版本号，所以 1.x 的报文与 2.0.0 不再互通**，混跑会被判 `SCHEMA_VERSION_MISMATCH` 并丢弃。这是有意的：D1 之后 `brake_latency_ms = 150` 是合法报文，1.x 的接收方会把它当非法丢掉，正好丢掉最该留证的那条。
 
 ---
 
 ## 附录 D　JSON Schema 全文
 
-以下五份 Schema 与 `schemas/` 目录下的文件逐字节一致，`validate.py` 会比对，不一致时报错。改 Schema 必须同时改文件和本附录。
+以下五份 Schema 由 `patrol/tools/sync_icd_appendix.py` 从 `patrol/schemas/` 直接
+生成，`validate.py` 第 6 项会按 `json.loads` 后深比较校验（差异清单 D4：原文要求
+「逐字节一致」，但 markdown 围栏缩进与行尾空白会让它误报，误报会训练出「红了就手工
+改一下附录」的习惯，反而削弱这条检查）。
+
+**改 Schema 之后跑一次 `python -m patrol.tools.sync_icd_appendix` 即可**，不要手工改本附录。
 
 Draft 2020-12。所有对象都带 `additionalProperties: false`，未定义的字段一律不接受。
-
+`evidence_package` 的 `l2_reading` 跨文件 `$ref` 了 `detection_event` 的定义（D3），
+两份 Schema 的 `$id` 就是为此而设。
 
 ### D.1　`detection_event.schema.json`
 
@@ -1443,100 +1537,319 @@ IF-1　DetectionEvent
   "$id": "https://patrol.local/schemas/detection_event.schema.json",
   "title": "DetectionEvent",
   "type": "object",
-  "required": ["schema_version","msg_type","seq","ts_mono_ns","ts_utc_ms","run_id","event_id","stage","model","context","detections","suspect","latency_ms"],
+  "required": [
+    "schema_version",
+    "msg_type",
+    "seq",
+    "ts_mono_ns",
+    "ts_utc_ms",
+    "run_id",
+    "event_id",
+    "stage",
+    "model",
+    "context",
+    "detections",
+    "suspect",
+    "latency_ms"
+  ],
   "additionalProperties": false,
   "properties": {
-    "schema_version": {"type":"string","pattern":"^\\d+\\.\\d+\\.\\d+$"},
-    "msg_type": {"const":"DETECTION_EVENT"},
-    "seq": {"type":"integer","minimum":0,"maximum":4294967295},
-    "ts_mono_ns": {"type":"integer","minimum":0},
-    "ts_utc_ms": {"type":"integer","minimum":0},
-    "run_id": {"type":"string","pattern":"^\\d{8}-\\d{6}-[0-9a-f]{4}$"},
-    "event_id": {"type":["string","null"],"pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
-    "stage": {"enum":["CRUISE","VERIFY"]},
+    "schema_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "msg_type": {
+      "const": "DETECTION_EVENT"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "ts_mono_ns": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "ts_utc_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^\\d{8}-\\d{6}-[0-9a-f]{4}$"
+    },
+    "event_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "stage": {
+      "enum": [
+        "CRUISE",
+        "VERIFY"
+      ]
+    },
     "model": {
-      "type":"object",
-      "required":["name","input_w","input_h","quant","conf_threshold","nms_iou"],
+      "type": "object",
+      "required": [
+        "name",
+        "input_w",
+        "input_h",
+        "quant",
+        "conf_threshold",
+        "nms_iou"
+      ],
       "additionalProperties": false,
-      "properties":{
-        "name":{"enum":["yolo11s","yolo11m"]},
-        "input_w":{"type":"integer","minimum":64,"maximum":4096},
-        "input_h":{"type":"integer","minimum":64,"maximum":4096},
-        "quant":{"enum":["INT8","FP16"]},
-        "conf_threshold":{"type":"number","minimum":0,"maximum":1},
-        "nms_iou":{"type":"number","minimum":0,"maximum":1}
+      "properties": {
+        "name": {
+          "enum": [
+            "yolo11s",
+            "yolo11m"
+          ]
+        },
+        "input_w": {
+          "type": "integer",
+          "minimum": 64,
+          "maximum": 4096
+        },
+        "input_h": {
+          "type": "integer",
+          "minimum": 64,
+          "maximum": 4096
+        },
+        "quant": {
+          "enum": [
+            "INT8",
+            "FP16"
+          ]
+        },
+        "conf_threshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "nms_iou": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
       }
     },
     "context": {
-      "type":"object",
-      "required":["waypoint_id","pose","pose_valid","speed_mps","ptz","image_w","image_h"],
+      "type": "object",
+      "required": [
+        "waypoint_id",
+        "pose",
+        "pose_valid",
+        "speed_mps",
+        "ptz",
+        "image_w",
+        "image_h"
+      ],
       "additionalProperties": false,
-      "properties":{
-        "waypoint_id":{"type":["string","null"],"pattern":"^WP-\\d{2}$"},
-        "pose":{
-          "type":"object",
-          "required":["x_m","y_m","yaw_deg","cov_trace"],
+      "properties": {
+        "waypoint_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^WP-\\d{2}$"
+        },
+        "pose": {
+          "type": "object",
+          "required": [
+            "x_m",
+            "y_m",
+            "yaw_deg",
+            "cov_trace"
+          ],
           "additionalProperties": false,
-          "properties":{
-            "x_m":{"type":"number"},
-            "y_m":{"type":"number"},
-            "yaw_deg":{"type":"number","minimum":-180,"maximum":180},
-            "cov_trace":{"type":"number","minimum":0}
+          "properties": {
+            "x_m": {
+              "type": "number"
+            },
+            "y_m": {
+              "type": "number"
+            },
+            "yaw_deg": {
+              "type": "number",
+              "minimum": -180,
+              "maximum": 180
+            },
+            "cov_trace": {
+              "type": "number",
+              "minimum": 0
+            }
           }
         },
-        "pose_valid":{"type":"boolean"},
-        "speed_mps":{"type":"number","minimum":0,"maximum":1.5},
-        "ptz":{
-          "type":"object",
-          "required":["pan_deg","tilt_deg","zoom","hfov_deg"],
+        "pose_valid": {
+          "type": "boolean"
+        },
+        "speed_mps": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1.5
+        },
+        "ptz": {
+          "type": "object",
+          "required": [
+            "pan_deg",
+            "tilt_deg",
+            "zoom",
+            "hfov_deg"
+          ],
           "additionalProperties": false,
-          "properties":{
-            "pan_deg":{"type":"number","minimum":-170,"maximum":170},
-            "tilt_deg":{"type":"number","minimum":-30,"maximum":60},
-            "zoom":{"type":"number","minimum":1,"maximum":3},
-            "hfov_deg":{"type":"number","exclusiveMinimum":0,"maximum":180}
+          "properties": {
+            "pan_deg": {
+              "type": "number",
+              "minimum": -170,
+              "maximum": 170
+            },
+            "tilt_deg": {
+              "type": "number",
+              "minimum": -30,
+              "maximum": 60
+            },
+            "zoom": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 3
+            },
+            "hfov_deg": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 180
+            }
           }
         },
-        "image_w":{"type":"integer","minimum":1},
-        "image_h":{"type":"integer","minimum":1}
+        "image_w": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "image_h": {
+          "type": "integer",
+          "minimum": 1
+        }
       }
     },
     "detections": {
-      "type":"array",
-      "items":{
-        "type":"object",
-        "required":["track_id","defect_class","confidence","bbox","target_size_m","est_distance_m","pixel_density_px","aim_offset","l2_reading"],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "track_id",
+          "defect_class",
+          "confidence",
+          "bbox",
+          "target_size_m",
+          "est_distance_m",
+          "pixel_density_px",
+          "aim_offset",
+          "l2_reading"
+        ],
         "additionalProperties": false,
-        "properties":{
-          "track_id":{"type":"integer","minimum":0},
-          "defect_class":{"$ref":"#/$defs/defectClass"},
-          "confidence":{"type":"number","minimum":0,"maximum":1},
-          "bbox":{"type":"array","items":{"type":"number","minimum":0},"minItems":4,"maxItems":4},
-          "target_size_m":{"type":"number","exclusiveMinimum":0},
-          "est_distance_m":{"type":"number","exclusiveMinimum":0},
-          "pixel_density_px":{"type":"number","minimum":0},
-          "aim_offset":{
-            "type":"object",
-            "required":["pan_deg","tilt_deg"],
-            "additionalProperties": false,
-            "properties":{"pan_deg":{"type":"number"},"tilt_deg":{"type":"number"}}
+        "properties": {
+          "track_id": {
+            "type": "integer",
+            "minimum": 0
           },
-          "l2_reading":{
-            "oneOf":[
-              {"type":"null"},
+          "defect_class": {
+            "$ref": "#/$defs/defectClass"
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "bbox": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "minimum": 0
+            },
+            "minItems": 4,
+            "maxItems": 4
+          },
+          "target_size_m": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "est_distance_m": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "pixel_density_px": {
+            "type": "number",
+            "minimum": 0
+          },
+          "aim_offset": {
+            "type": "object",
+            "required": [
+              "pan_deg",
+              "tilt_deg"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "pan_deg": {
+                "type": "number"
+              },
+              "tilt_deg": {
+                "type": "number"
+              }
+            }
+          },
+          "l2_reading": {
+            "$ref": "#/$defs/reading"
+          },
+          "quality": {
+            "$comment": "差异清单 A4 增补的可选字段（ICD 冻结规则：新增可选字段=次版本号+1，通知即可）。方案书 §6.4 的四项质量指标，ICD v1.0 遗漏。",
+            "oneOf": [
               {
-                "type":"object",
-                "required":["kind","value","unit","range_min","range_max","in_normal_band","reading_confidence","roi"],
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "pixel_density_px",
+                  "pixel_density",
+                  "blur",
+                  "highlight",
+                  "occlusion",
+                  "score"
+                ],
                 "additionalProperties": false,
-                "properties":{
-                  "kind":{"enum":["POINTER_GAUGE","DIGITAL_DISPLAY","INDICATOR_LIGHT","SWITCH_POSITION"]},
-                  "value":{"type":["number","string","null"]},
-                  "unit":{"type":["string","null"]},
-                  "range_min":{"type":["number","null"]},
-                  "range_max":{"type":["number","null"]},
-                  "in_normal_band":{"type":["boolean","null"]},
-                  "reading_confidence":{"type":"number","minimum":0,"maximum":1},
-                  "roi":{"type":"array","items":{"type":"number","minimum":0},"minItems":4,"maxItems":4}
+                "properties": {
+                  "pixel_density_px": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "pixel_density": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "blur": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "highlight": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "occlusion": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "score": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
                 }
               }
             ]
@@ -1545,57 +1858,272 @@ IF-1　DetectionEvent
       }
     },
     "l3_anomaly": {
-      "oneOf":[
-        {"type":"null"},
+      "oneOf": [
         {
-          "type":"object",
-          "required":["model","anomaly_score","threshold","is_anomaly","heatmap_ref"],
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "required": [
+            "model",
+            "anomaly_score",
+            "threshold",
+            "is_anomaly",
+            "heatmap_ref"
+          ],
           "additionalProperties": false,
-          "properties":{
-            "model":{"type":"string"},
-            "anomaly_score":{"type":"number","minimum":0,"maximum":1},
-            "threshold":{"type":"number","minimum":0,"maximum":1},
-            "is_anomaly":{"type":"boolean"},
-            "heatmap_ref":{"type":["string","null"]}
+          "properties": {
+            "model": {
+              "type": "string"
+            },
+            "anomaly_score": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "threshold": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "is_anomaly": {
+              "type": "boolean"
+            },
+            "heatmap_ref": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         }
       ]
     },
     "suspect": {
-      "type":"object",
-      "required":["is_suspect","trigger_rule","target_track_id","severity","novelty","priority","suppressed_by"],
+      "type": "object",
+      "required": [
+        "is_suspect",
+        "trigger_rule",
+        "target_track_id",
+        "severity",
+        "novelty",
+        "priority",
+        "suppressed_by"
+      ],
       "additionalProperties": false,
-      "properties":{
-        "is_suspect":{"type":"boolean"},
-        "trigger_rule":{"oneOf":[{"type":"null"},{"enum":["CONF_BAND","L2_UNREADABLE","L2_OUT_OF_BAND","L3_ANOMALY","MANUAL"]}]},
-        "target_track_id":{"type":["integer","null"],"minimum":0},
-        "severity":{"type":"number","minimum":0,"maximum":1},
-        "novelty":{"type":"number","minimum":0,"maximum":1},
-        "priority":{"type":"number","minimum":0,"maximum":1},
-        "suppressed_by":{"oneOf":[{"type":"null"},{"enum":["TRACK_COOLDOWN","WAYPOINT_ONCE","RESUME_SILENCE","BUDGET_EXHAUSTED","POSE_INVALID"]}]}
+      "properties": {
+        "is_suspect": {
+          "type": "boolean"
+        },
+        "trigger_rule": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "enum": [
+                "CONF_BAND",
+                "L2_UNREADABLE",
+                "L2_OUT_OF_BAND",
+                "L3_ANOMALY",
+                "MANUAL",
+                "QUALITY_LOW"
+              ]
+            }
+          ]
+        },
+        "target_track_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "severity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "novelty": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "priority": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "suppressed_by": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "enum": [
+                "TRACK_COOLDOWN",
+                "WAYPOINT_ONCE",
+                "RESUME_SILENCE",
+                "BUDGET_EXHAUSTED",
+                "POSE_INVALID"
+              ]
+            }
+          ]
+        }
       }
     },
     "latency_ms": {
-      "type":"object",
-      "required":["capture_to_infer","infer","postproc","total"],
+      "type": "object",
+      "required": [
+        "capture_to_infer",
+        "infer",
+        "postproc",
+        "total"
+      ],
       "additionalProperties": false,
-      "properties":{
-        "capture_to_infer":{"type":"integer","minimum":0},
-        "infer":{"type":"integer","minimum":0},
-        "postproc":{"type":"integer","minimum":0},
-        "total":{"type":"integer","minimum":0}
+      "properties": {
+        "capture_to_infer": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "infer": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "postproc": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     }
   },
-  "allOf":[
+  "allOf": [
     {
-      "if":{"properties":{"suspect":{"properties":{"is_suspect":{"const":true}}}}},
-      "then":{"properties":{"event_id":{"type":"string"},"suspect":{"required":["trigger_rule"],"properties":{"trigger_rule":{"type":"string"}}}}}
+      "if": {
+        "properties": {
+          "suspect": {
+            "properties": {
+              "is_suspect": {
+                "const": true
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "event_id": {
+            "type": "string"
+          },
+          "suspect": {
+            "required": [
+              "trigger_rule"
+            ],
+            "properties": {
+              "trigger_rule": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
     }
   ],
-  "$defs":{
-    "defectClass":{
-      "enum":["PRESSURE_GAUGE","OIL_LEVEL_GAUGE","INDICATOR_LIGHT","SWITCH_HANDLE","INSULATOR_BREAK","OIL_LEAK","RUST_CORROSION","FOREIGN_OBJECT","DOOR_OPEN","CABLE_LOOSE"]
+  "$defs": {
+    "defectClass": {
+      "enum": [
+        "PRESSURE_GAUGE",
+        "OIL_LEVEL_GAUGE",
+        "INDICATOR_LIGHT",
+        "SWITCH_HANDLE",
+        "INSULATOR_BREAK",
+        "OIL_LEAK",
+        "RUST_CORROSION",
+        "FOREIGN_OBJECT",
+        "DOOR_OPEN",
+        "CABLE_LOOSE"
+      ]
+    },
+    "reading": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "value",
+            "unit",
+            "range_min",
+            "range_max",
+            "in_normal_band",
+            "reading_confidence",
+            "roi"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "POINTER_GAUGE",
+                "DIGITAL_DISPLAY",
+                "INDICATOR_LIGHT",
+                "SWITCH_POSITION"
+              ]
+            },
+            "value": {
+              "type": [
+                "number",
+                "string",
+                "null"
+              ]
+            },
+            "unit": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "range_min": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "range_max": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "in_normal_band": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "reading_confidence": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "roi": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "minimum": 0
+              },
+              "minItems": 4,
+              "maxItems": 4
+            }
+          }
+        }
+      ],
+      "$comment": "D3：提到 $defs.reading 供 evidence_package 跨文件 $ref 复用。证据包是要进台账、回流训练集的最终产物，它的读数结构不该比中间报文校验更松。"
     }
   }
 }
@@ -1611,52 +2139,360 @@ IF-2　ControlCommand
   "$id": "https://patrol.local/schemas/control_command.schema.json",
   "title": "ControlCommand",
   "type": "object",
-  "required": ["schema_version","msg_type","cmd_id","seq","ts_mono_ns","ts_utc_ms","run_id","event_id","issued_by","command","params","timeout_ms"],
+  "required": [
+    "schema_version",
+    "msg_type",
+    "cmd_id",
+    "seq",
+    "ts_mono_ns",
+    "ts_utc_ms",
+    "run_id",
+    "event_id",
+    "issued_by",
+    "command",
+    "params",
+    "timeout_ms"
+  ],
   "additionalProperties": false,
   "properties": {
-    "schema_version": {"type":"string","pattern":"^\\d+\\.\\d+\\.\\d+$"},
-    "msg_type": {"const":"CONTROL_COMMAND"},
-    "cmd_id": {"$ref":"#/$defs/uuid"},
-    "seq": {"type":"integer","minimum":0,"maximum":4294967295},
-    "ts_mono_ns": {"type":"integer","minimum":0},
-    "ts_utc_ms": {"type":"integer","minimum":0},
-    "run_id": {"type":"string","pattern":"^\\d{8}-\\d{6}-[0-9a-f]{4}$"},
-    "event_id": {"oneOf":[{"type":"null"},{"$ref":"#/$defs/uuid"}]},
-    "issued_by": {"enum":["MISSION_FSM","CLOUD_MANUAL","WATCHDOG"]},
-    "command": {"enum":["PAUSE","RESUME","CREEP_FORWARD","GOTO_OBSERVE","PTZ_SET","HEARTBEAT"]},
-    "params": {"type":"object"},
-    "timeout_ms": {"type":"integer","minimum":1,"maximum":30000}
+    "schema_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "msg_type": {
+      "const": "CONTROL_COMMAND"
+    },
+    "cmd_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "ts_mono_ns": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "ts_utc_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^\\d{8}-\\d{6}-[0-9a-f]{4}$"
+    },
+    "event_id": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/uuid"
+        }
+      ]
+    },
+    "issued_by": {
+      "enum": [
+        "MISSION_FSM",
+        "CLOUD_MANUAL",
+        "WATCHDOG"
+      ]
+    },
+    "command": {
+      "enum": [
+        "PAUSE",
+        "RESUME",
+        "CREEP_FORWARD",
+        "GOTO_OBSERVE",
+        "PTZ_SET",
+        "PTZ_RATE",
+        "HEARTBEAT"
+      ]
+    },
+    "params": {
+      "type": "object"
+    },
+    "timeout_ms": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 30000
+    }
   },
   "allOf": [
-    {"if":{"properties":{"command":{"const":"PAUSE"}},"required":["command"]},
-     "then":{"properties":{"params":{"$ref":"#/$defs/pausePar"}}}},
-    {"if":{"properties":{"command":{"const":"RESUME"}},"required":["command"]},
-     "then":{"properties":{"params":{"type":"object","additionalProperties":false,"properties":{}}}}},
-    {"if":{"properties":{"command":{"const":"CREEP_FORWARD"}},"required":["command"]},
-     "then":{"properties":{"params":{"$ref":"#/$defs/creepPar"}}}},
-    {"if":{"properties":{"command":{"const":"GOTO_OBSERVE"}},"required":["command"]},
-     "then":{"properties":{"params":{"$ref":"#/$defs/gotoPar"}}}},
-    {"if":{"properties":{"command":{"const":"PTZ_SET"}},"required":["command"]},
-     "then":{"properties":{"params":{"$ref":"#/$defs/ptzPar"}}}},
-    {"if":{"properties":{"command":{"const":"HEARTBEAT"}},"required":["command"]},
-     "then":{"properties":{"params":{"$ref":"#/$defs/hbPar"}}}}
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "const": "PAUSE"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      },
+      "then": {
+        "properties": {
+          "params": {
+            "$ref": "#/$defs/pausePar"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "const": "RESUME"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      },
+      "then": {
+        "properties": {
+          "params": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {}
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "const": "CREEP_FORWARD"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      },
+      "then": {
+        "properties": {
+          "params": {
+            "$ref": "#/$defs/creepPar"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "const": "GOTO_OBSERVE"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      },
+      "then": {
+        "properties": {
+          "params": {
+            "$ref": "#/$defs/gotoPar"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "const": "PTZ_SET"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      },
+      "then": {
+        "properties": {
+          "params": {
+            "$ref": "#/$defs/ptzPar"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "const": "PTZ_RATE"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      },
+      "then": {
+        "properties": {
+          "params": {
+            "$ref": "#/$defs/ratePar"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "const": "HEARTBEAT"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      },
+      "then": {
+        "properties": {
+          "params": {
+            "$ref": "#/$defs/hbPar"
+          }
+        }
+      }
+    }
   ],
   "$defs": {
-    "uuid": {"type":"string","pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
-    "pausePar": {"type":"object","required":["reason"],"additionalProperties":false,
-      "properties":{"reason":{"enum":["VERIFY_REQUEST","CLOUD_MANUAL","WATCHDOG_RECOVER"]}}},
-    "creepPar": {"type":"object","required":["distance_m"],"additionalProperties":false,
-      "properties":{"distance_m":{"type":"number","minimum":0.05,"maximum":0.50}}},
-    "gotoPar": {"type":"object","required":["waypoint_id","tolerance_m"],"additionalProperties":false,
-      "properties":{"waypoint_id":{"type":"string","pattern":"^WP-\\d{2}$"},
-                    "tolerance_m":{"type":"number","minimum":0.10,"maximum":0.50}}},
-    "ptzPar": {"type":"object","required":["pan_deg","tilt_deg","zoom","speed"],"additionalProperties":false,
-      "properties":{"pan_deg":{"type":"number","minimum":-170.0,"maximum":170.0},
-                    "tilt_deg":{"type":"number","minimum":-30.0,"maximum":60.0},
-                    "zoom":{"type":"number","minimum":1.0,"maximum":3.0},
-                    "speed":{"enum":["SLOW","NORMAL"]}}},
-    "hbPar": {"type":"object","required":["mission_state"],"additionalProperties":false,
-      "properties":{"mission_state":{"enum":["CRUISE","SUSPECT","HALT_REQ","AIM","ZOOM","CAPTURE","VERIFY","PACK","RESUME","ABORT"]}}}
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "pausePar": {
+      "type": "object",
+      "required": [
+        "reason"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "enum": [
+            "VERIFY_REQUEST",
+            "CLOUD_MANUAL",
+            "WATCHDOG_RECOVER"
+          ]
+        }
+      }
+    },
+    "creepPar": {
+      "type": "object",
+      "required": [
+        "distance_m"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "distance_m": {
+          "type": "number",
+          "minimum": 0.05,
+          "maximum": 0.5
+        }
+      }
+    },
+    "gotoPar": {
+      "type": "object",
+      "required": [
+        "waypoint_id",
+        "tolerance_m"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "waypoint_id": {
+          "type": "string",
+          "pattern": "^WP-\\d{2}$"
+        },
+        "tolerance_m": {
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 0.5
+        }
+      }
+    },
+    "ptzPar": {
+      "type": "object",
+      "required": [
+        "pan_deg",
+        "tilt_deg",
+        "zoom",
+        "speed"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "pan_deg": {
+          "type": "number",
+          "minimum": -170.0,
+          "maximum": 170.0
+        },
+        "tilt_deg": {
+          "type": "number",
+          "minimum": -30.0,
+          "maximum": 60.0
+        },
+        "zoom": {
+          "type": "number",
+          "minimum": 1.0,
+          "maximum": 3.0
+        },
+        "speed": {
+          "enum": [
+            "SLOW",
+            "NORMAL"
+          ]
+        }
+      }
+    },
+    "ratePar": {
+      "type": "object",
+      "required": [
+        "pan_dps",
+        "tilt_dps",
+        "ttl_ms"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "pan_dps": {
+          "type": "number",
+          "minimum": -60.0,
+          "maximum": 60.0
+        },
+        "tilt_dps": {
+          "type": "number",
+          "minimum": -40.0,
+          "maximum": 40.0
+        },
+        "ttl_ms": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 500
+        }
+      },
+      "$comment": "A1：云台速率闭环。ttl_ms 是自失效时长——超过它没有新指令刷新，网关把云台速度归零，防止 mission 崩溃时云台一直转到限位。"
+    },
+    "hbPar": {
+      "type": "object",
+      "required": [
+        "mission_state"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "mission_state": {
+          "enum": [
+            "CRUISE",
+            "SUSPECT",
+            "HALT_REQ",
+            "AIM",
+            "ZOOM",
+            "CAPTURE",
+            "VERIFY",
+            "PACK",
+            "RESUME",
+            "ABORT"
+          ]
+        }
+      }
+    }
   }
 }
 ```
@@ -1671,40 +2507,184 @@ IF-2　CommandAck
   "$id": "https://patrol.local/schemas/command_ack.schema.json",
   "title": "CommandAck",
   "type": "object",
-  "required": ["schema_version","msg_type","cmd_id","ts_mono_ns","result","reject_code","reject_detail","checks","exec_handle"],
+  "required": [
+    "schema_version",
+    "msg_type",
+    "cmd_id",
+    "ts_mono_ns",
+    "result",
+    "reject_code",
+    "reject_detail",
+    "checks",
+    "exec_handle"
+  ],
   "additionalProperties": false,
   "properties": {
-    "schema_version": {"type":"string","pattern":"^\\d+\\.\\d+\\.\\d+$"},
-    "msg_type": {"const":"COMMAND_ACK"},
-    "cmd_id": {"type":"string","pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
-    "ts_mono_ns": {"type":"integer","minimum":0},
-    "result": {"enum":["ACCEPTED","REJECTED","PREEMPTED"]},
-    "reject_code": {"oneOf":[{"type":"null"},{"enum":[
-      "NOT_IN_WHITELIST","SCHEMA_INVALID","SCHEMA_VERSION_MISMATCH","PARAM_MISSING",
-      "PARAM_OUT_OF_RANGE","UNKNOWN_WAYPOINT","STATE_CONFLICT","SAFETY_OVERRIDE",
-      "HEARTBEAT_LOST","DRIVER_NOT_READY","DRIVER_TIMEOUT","ESTOP_ACTIVE"]}]},
-    "reject_detail": {"type":["string","null"],"maxLength":256},
+    "schema_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "msg_type": {
+      "const": "COMMAND_ACK"
+    },
+    "cmd_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "ts_mono_ns": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "result": {
+      "enum": [
+        "ACCEPTED",
+        "REJECTED",
+        "PREEMPTED"
+      ]
+    },
+    "reject_code": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "enum": [
+            "NOT_IN_WHITELIST",
+            "SCHEMA_INVALID",
+            "SCHEMA_VERSION_MISMATCH",
+            "PARAM_MISSING",
+            "PARAM_OUT_OF_RANGE",
+            "UNKNOWN_WAYPOINT",
+            "STATE_CONFLICT",
+            "SAFETY_OVERRIDE",
+            "HEARTBEAT_LOST",
+            "DRIVER_NOT_READY",
+            "DRIVER_TIMEOUT",
+            "ESTOP_ACTIVE"
+          ]
+        }
+      ]
+    },
+    "reject_detail": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 256
+    },
     "checks": {
-      "type":"object",
-      "required":["whitelist","schema","range","state_conflict","safety_override"],
+      "type": "object",
+      "required": [
+        "whitelist",
+        "schema",
+        "range",
+        "state_conflict",
+        "safety_override"
+      ],
       "additionalProperties": false,
-      "properties":{
-        "whitelist":{"$ref":"#/$defs/check"},
-        "schema":{"$ref":"#/$defs/check"},
-        "range":{"$ref":"#/$defs/check"},
-        "state_conflict":{"$ref":"#/$defs/check"},
-        "safety_override":{"$ref":"#/$defs/check"}
+      "properties": {
+        "whitelist": {
+          "$ref": "#/$defs/check"
+        },
+        "schema": {
+          "$ref": "#/$defs/check"
+        },
+        "range": {
+          "$ref": "#/$defs/check"
+        },
+        "state_conflict": {
+          "$ref": "#/$defs/check"
+        },
+        "safety_override": {
+          "$ref": "#/$defs/check"
+        }
       }
     },
-    "exec_handle": {"type":["string","null"]}
+    "exec_handle": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
   },
   "allOf": [
-    {"if":{"properties":{"result":{"const":"ACCEPTED"}},"required":["result"]},
-     "then":{"properties":{"reject_code":{"type":"null"},"exec_handle":{"type":"string"}}}},
-    {"if":{"properties":{"result":{"const":"REJECTED"}},"required":["result"]},
-     "then":{"properties":{"reject_code":{"type":"string"},"exec_handle":{"type":"null"}}}}
+    {
+      "if": {
+        "properties": {
+          "result": {
+            "const": "ACCEPTED"
+          }
+        },
+        "required": [
+          "result"
+        ]
+      },
+      "then": {
+        "properties": {
+          "reject_code": {
+            "type": "null"
+          },
+          "exec_handle": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "result": {
+            "const": "REJECTED"
+          }
+        },
+        "required": [
+          "result"
+        ]
+      },
+      "then": {
+        "properties": {
+          "reject_code": {
+            "type": "string"
+          },
+          "exec_handle": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "result": {
+            "const": "PREEMPTED"
+          }
+        },
+        "required": [
+          "result"
+        ]
+      },
+      "then": {
+        "properties": {
+          "reject_code": {
+            "type": "null"
+          },
+          "exec_handle": {
+            "type": "string"
+          }
+        }
+      },
+      "$comment": "D2：PREEMPTED 表示指令被更高优先级动作打断（ICD §4.4），语义上不是拒绝，不应带 reject_code。原来只写了 ACCEPTED / REJECTED 两条，于是一条同时带 reject_code 和 exec_handle 的 PREEMPTED 会被放行。"
+    }
   ],
-  "$defs": {"check":{"enum":["PASS","FAIL","SKIP"]}}
+  "$defs": {
+    "check": {
+      "enum": [
+        "PASS",
+        "FAIL",
+        "SKIP"
+      ]
+    }
+  }
 }
 ```
 
@@ -1718,99 +2698,381 @@ IF-3　StatusReport
   "$id": "https://patrol.local/schemas/status_report.schema.json",
   "title": "StatusReport",
   "type": "object",
-  "required": ["schema_version","msg_type","seq","ts_mono_ns","ts_utc_ms","run_id","report_kind","chassis","ptz","pose","watchdog"],
+  "required": [
+    "schema_version",
+    "msg_type",
+    "seq",
+    "ts_mono_ns",
+    "ts_utc_ms",
+    "run_id",
+    "report_kind",
+    "chassis",
+    "ptz",
+    "pose",
+    "watchdog"
+  ],
   "additionalProperties": false,
   "properties": {
-    "schema_version": {"type":"string","pattern":"^\\d+\\.\\d+\\.\\d+$"},
-    "msg_type": {"const":"STATUS_REPORT"},
-    "seq": {"type":"integer","minimum":0,"maximum":4294967295},
-    "ts_mono_ns": {"type":"integer","minimum":0},
-    "ts_utc_ms": {"type":"integer","minimum":0},
-    "run_id": {"type":"string","pattern":"^\\d{8}-\\d{6}-[0-9a-f]{4}$"},
-    "report_kind": {"enum":["PERIODIC","SAFETY_EVENT","EXEC_UPDATE"]},
+    "schema_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "msg_type": {
+      "const": "STATUS_REPORT"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "ts_mono_ns": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "ts_utc_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^\\d{8}-\\d{6}-[0-9a-f]{4}$"
+    },
+    "report_kind": {
+      "enum": [
+        "PERIODIC",
+        "SAFETY_EVENT",
+        "EXEC_UPDATE"
+      ]
+    },
     "chassis": {
-      "type":"object",
-      "required":["state","speed_mps","path_progress","distance_to_goal_m","current_waypoint_id","battery_pct","safety_layer_active"],
+      "type": "object",
+      "required": [
+        "state",
+        "speed_mps",
+        "path_progress",
+        "distance_to_goal_m",
+        "current_waypoint_id",
+        "battery_pct",
+        "safety_layer_active"
+      ],
       "additionalProperties": false,
-      "properties":{
-        "state":{"enum":["MOVING","STOPPING","STOPPED","PAUSED","RETURNING","FAULT","ESTOP"]},
-        "speed_mps":{"type":"number","minimum":0,"maximum":1.5},
-        "path_progress":{"type":"number","minimum":0,"maximum":1},
-        "distance_to_goal_m":{"type":["number","null"],"minimum":0},
-        "current_waypoint_id":{"type":["string","null"],"pattern":"^WP-\\d{2}$"},
-        "battery_pct":{"type":"number","minimum":0,"maximum":100},
-        "safety_layer_active":{"type":"boolean"}
+      "properties": {
+        "state": {
+          "enum": [
+            "MOVING",
+            "STOPPING",
+            "STOPPED",
+            "PAUSED",
+            "RETURNING",
+            "FAULT",
+            "ESTOP"
+          ]
+        },
+        "speed_mps": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1.5
+        },
+        "path_progress": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "distance_to_goal_m": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "current_waypoint_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^WP-\\d{2}$"
+        },
+        "battery_pct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "safety_layer_active": {
+          "type": "boolean"
+        }
       }
     },
     "ptz": {
-      "type":"object",
-      "required":["pan_deg","tilt_deg","zoom","hfov_deg","moving","focus_state","at_target"],
+      "type": "object",
+      "required": [
+        "pan_deg",
+        "tilt_deg",
+        "zoom",
+        "hfov_deg",
+        "moving",
+        "focus_state",
+        "at_target"
+      ],
       "additionalProperties": false,
-      "properties":{
-        "pan_deg":{"type":"number","minimum":-170,"maximum":170},
-        "tilt_deg":{"type":"number","minimum":-30,"maximum":60},
-        "zoom":{"type":"number","minimum":1,"maximum":3},
-        "hfov_deg":{"type":"number","exclusiveMinimum":0,"maximum":180},
-        "moving":{"type":"boolean"},
-        "focus_state":{"enum":["FOCUSING","LOCKED","FAILED"]},
-        "at_target":{"type":"boolean"}
+      "properties": {
+        "pan_deg": {
+          "type": "number",
+          "minimum": -170,
+          "maximum": 170
+        },
+        "tilt_deg": {
+          "type": "number",
+          "minimum": -30,
+          "maximum": 60
+        },
+        "zoom": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 3
+        },
+        "hfov_deg": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 180
+        },
+        "moving": {
+          "type": "boolean"
+        },
+        "focus_state": {
+          "enum": [
+            "FOCUSING",
+            "LOCKED",
+            "FAILED"
+          ]
+        },
+        "at_target": {
+          "type": "boolean"
+        }
       }
     },
     "pose": {
-      "type":"object",
-      "required":["x_m","y_m","yaw_deg","cov_trace","valid","source"],
+      "type": "object",
+      "required": [
+        "x_m",
+        "y_m",
+        "yaw_deg",
+        "cov_trace",
+        "valid",
+        "source"
+      ],
       "additionalProperties": false,
-      "properties":{
-        "x_m":{"type":"number"},"y_m":{"type":"number"},
-        "yaw_deg":{"type":"number","minimum":-180,"maximum":180},
-        "cov_trace":{"type":"number","minimum":0},
-        "valid":{"type":"boolean"},
-        "source":{"enum":["LIDAR_SLAM","ODOM_ONLY","LOST"]}
+      "properties": {
+        "x_m": {
+          "type": "number"
+        },
+        "y_m": {
+          "type": "number"
+        },
+        "yaw_deg": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180
+        },
+        "cov_trace": {
+          "type": "number",
+          "minimum": 0
+        },
+        "valid": {
+          "type": "boolean"
+        },
+        "source": {
+          "enum": [
+            "LIDAR_SLAM",
+            "ODOM_ONLY",
+            "LOST"
+          ]
+        }
       }
     },
     "watchdog": {
-      "type":"object",
-      "required":["heartbeat_ok","last_heartbeat_age_ms","watchdog_triggered"],
+      "type": "object",
+      "required": [
+        "heartbeat_ok",
+        "last_heartbeat_age_ms",
+        "watchdog_triggered"
+      ],
       "additionalProperties": false,
-      "properties":{
-        "heartbeat_ok":{"type":"boolean"},
-        "last_heartbeat_age_ms":{"type":"integer","minimum":0},
-        "watchdog_triggered":{"type":"boolean"}
+      "properties": {
+        "heartbeat_ok": {
+          "type": "boolean"
+        },
+        "last_heartbeat_age_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "watchdog_triggered": {
+          "type": "boolean"
+        }
       }
     },
     "exec": {
-      "oneOf":[{"type":"null"},{
-        "type":"object",
-        "required":["exec_handle","cmd_id","progress","elapsed_ms","fail_reason"],
-        "additionalProperties": false,
-        "properties":{
-          "exec_handle":{"type":"string"},
-          "cmd_id":{"type":"string","pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
-          "progress":{"enum":["IN_PROGRESS","DONE","FAILED","PREEMPTED"]},
-          "elapsed_ms":{"type":"integer","minimum":0},
-          "fail_reason":{"type":["string","null"]}
-        }}]
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "required": [
+            "exec_handle",
+            "cmd_id",
+            "progress",
+            "elapsed_ms",
+            "fail_reason"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "exec_handle": {
+              "type": "string"
+            },
+            "cmd_id": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            },
+            "progress": {
+              "enum": [
+                "IN_PROGRESS",
+                "DONE",
+                "FAILED",
+                "PREEMPTED"
+              ]
+            },
+            "elapsed_ms": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "fail_reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      ]
     },
     "safety": {
-      "oneOf":[{"type":"null"},{
-        "type":"object",
-        "required":["event_type","severity","source","action_taken","brake_latency_ms","detail"],
-        "additionalProperties": false,
-        "properties":{
-          "event_type":{"enum":["OBSTACLE_DETECTED","BUMPER_HIT","ESTOP_PRESSED","TILT_LIMIT","MOTOR_FAULT","LOW_BATTERY","LOCALIZATION_LOST","HEARTBEAT_LOST","ILLEGAL_COMMAND","SCHEMA_VERSION_MISMATCH","COMM_LOST"]},
-          "severity":{"enum":["INFO","WARN","CRITICAL"]},
-          "source":{"enum":["CHASSIS_SAFETY_LAYER","GATEWAY","DRIVER"]},
-          "action_taken":{"enum":["NONE","BRAKE","ABORT_VERIFY","FORCE_RESUME","RETURN_HOME"]},
-          "brake_latency_ms":{"type":["integer","null"],"minimum":0,"maximum":100},
-          "detail":{"type":"string","maxLength":256}
-        }}]
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "required": [
+            "event_type",
+            "severity",
+            "source",
+            "action_taken",
+            "brake_latency_ms",
+            "detail"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "event_type": {
+              "enum": [
+                "OBSTACLE_DETECTED",
+                "BUMPER_HIT",
+                "ESTOP_PRESSED",
+                "TILT_LIMIT",
+                "MOTOR_FAULT",
+                "LOW_BATTERY",
+                "LOCALIZATION_LOST",
+                "HEARTBEAT_LOST",
+                "ILLEGAL_COMMAND",
+                "SCHEMA_VERSION_MISMATCH",
+                "COMM_LOST"
+              ]
+            },
+            "severity": {
+              "enum": [
+                "INFO",
+                "WARN",
+                "CRITICAL"
+              ]
+            },
+            "source": {
+              "enum": [
+                "CHASSIS_SAFETY_LAYER",
+                "GATEWAY",
+                "DRIVER"
+              ]
+            },
+            "action_taken": {
+              "enum": [
+                "NONE",
+                "BRAKE",
+                "ABORT_VERIFY",
+                "FORCE_RESUME",
+                "RETURN_HOME"
+              ]
+            },
+            "brake_latency_ms": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 5000,
+              "$comment": "D1：这是底盘报上来的**实测值**，不是指令参数。上限焊在验收指标 100 ms 上会让『制动超标』这条报文整条解析失败，恰好丢掉最该留证的证据。Schema 只挡明显非法的量级，100 ms 的验收判定由网关按 limits.BRAKE_LATENCY_LIMIT_MS 做逻辑判断并抛 SafetyEvent。"
+            },
+            "detail": {
+              "type": "string",
+              "maxLength": 256
+            }
+          }
+        }
+      ]
     }
   },
-  "allOf":[
-    {"if":{"properties":{"report_kind":{"const":"SAFETY_EVENT"}},"required":["report_kind"]},
-     "then":{"required":["safety"],"properties":{"safety":{"type":"object"}}}},
-    {"if":{"properties":{"report_kind":{"const":"EXEC_UPDATE"}},"required":["report_kind"]},
-     "then":{"required":["exec"],"properties":{"exec":{"type":"object"}}}}
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "report_kind": {
+            "const": "SAFETY_EVENT"
+          }
+        },
+        "required": [
+          "report_kind"
+        ]
+      },
+      "then": {
+        "required": [
+          "safety"
+        ],
+        "properties": {
+          "safety": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "report_kind": {
+            "const": "EXEC_UPDATE"
+          }
+        },
+        "required": [
+          "report_kind"
+        ]
+      },
+      "then": {
+        "required": [
+          "exec"
+        ],
+        "properties": {
+          "exec": {
+            "type": "object"
+          }
+        }
+      }
+    }
   ]
 }
 ```
@@ -1825,95 +3087,310 @@ IF-4　EvidencePackage
   "$id": "https://patrol.local/schemas/evidence_package.schema.json",
   "title": "EvidencePackage",
   "type": "object",
-  "required": ["schema_version","msg_type","run_id","event_id","waypoint_id","ts_utc_ms","verdict","before","after","gain","timeline","files","abort"],
+  "required": [
+    "schema_version",
+    "msg_type",
+    "run_id",
+    "event_id",
+    "waypoint_id",
+    "ts_utc_ms",
+    "verdict",
+    "before",
+    "after",
+    "gain",
+    "timeline",
+    "files",
+    "abort"
+  ],
   "additionalProperties": false,
   "properties": {
-    "schema_version": {"type":"string","pattern":"^\\d+\\.\\d+\\.\\d+$"},
-    "msg_type": {"const":"EVIDENCE_PACKAGE"},
-    "run_id": {"type":"string","pattern":"^\\d{8}-\\d{6}-[0-9a-f]{4}$"},
-    "event_id": {"type":"string","pattern":"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
-    "waypoint_id": {"type":"string","pattern":"^WP-\\d{2}$"},
-    "ts_utc_ms": {"type":"integer","minimum":0},
+    "schema_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "msg_type": {
+      "const": "EVIDENCE_PACKAGE"
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^\\d{8}-\\d{6}-[0-9a-f]{4}$"
+    },
+    "event_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "waypoint_id": {
+      "type": "string",
+      "pattern": "^WP-\\d{2}$"
+    },
+    "ts_utc_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
     "verdict": {
-      "type":"object",
-      "required":["result","defect_class","severity","needs_human_review","confidence"],
+      "type": "object",
+      "required": [
+        "result",
+        "defect_class",
+        "severity",
+        "needs_human_review",
+        "confidence"
+      ],
       "additionalProperties": false,
-      "properties":{
-        "result":{"enum":["CONFIRMED_DEFECT","FALSE_ALARM","READING_OK","READING_ABNORMAL","UNKNOWN_ANOMALY","INCONCLUSIVE"]},
-        "defect_class":{"type":["string","null"]},
-        "severity":{"enum":["INFO","WARN","CRITICAL"]},
-        "needs_human_review":{"type":"boolean"},
-        "confidence":{"type":"number","minimum":0,"maximum":1}
+      "properties": {
+        "result": {
+          "enum": [
+            "CONFIRMED_DEFECT",
+            "FALSE_ALARM",
+            "READING_OK",
+            "READING_ABNORMAL",
+            "UNKNOWN_ANOMALY",
+            "INCONCLUSIVE"
+          ]
+        },
+        "defect_class": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "severity": {
+          "enum": [
+            "INFO",
+            "WARN",
+            "CRITICAL"
+          ]
+        },
+        "needs_human_review": {
+          "type": "boolean"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
       }
     },
-    "before": {"$ref":"#/$defs/snapshot"},
-    "after": {"$ref":"#/$defs/snapshot"},
+    "before": {
+      "$ref": "#/$defs/snapshot"
+    },
+    "after": {
+      "$ref": "#/$defs/snapshot"
+    },
     "gain": {
-      "type":"object",
-      "required":["delta_conf","pixel_density_ratio","verify_success"],
+      "type": "object",
+      "required": [
+        "delta_conf",
+        "pixel_density_ratio",
+        "verify_success"
+      ],
       "additionalProperties": false,
-      "properties":{
-        "delta_conf":{"type":"number","minimum":-1,"maximum":1},
-        "pixel_density_ratio":{"type":"number","minimum":0},
-        "verify_success":{"type":"boolean"}
+      "properties": {
+        "delta_conf": {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1
+        },
+        "pixel_density_ratio": {
+          "type": "number",
+          "minimum": 0
+        },
+        "verify_success": {
+          "type": "boolean"
+        }
       }
     },
     "timeline": {
-      "type":"array",
-      "items":{
-        "type":"object",
-        "required":["state","duration_ms"],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "state",
+          "duration_ms"
+        ],
         "additionalProperties": false,
-        "properties":{
-          "state":{"enum":["SUSPECT","HALT_REQ","AIM","ZOOM","CAPTURE","VERIFY","PACK","RESUME","ABORT"]},
-          "duration_ms":{"type":"integer","minimum":0}
+        "properties": {
+          "state": {
+            "enum": [
+              "SUSPECT",
+              "HALT_REQ",
+              "AIM",
+              "ZOOM",
+              "CAPTURE",
+              "VERIFY",
+              "PACK",
+              "RESUME",
+              "ABORT"
+            ]
+          },
+          "duration_ms": {
+            "type": "integer",
+            "minimum": 0
+          }
         }
       }
     },
     "files": {
-      "type":"array",
-      "minItems":1,
-      "items":{
-        "type":"object",
-        "required":["path","role","bytes","sha256","uploaded"],
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "role",
+          "bytes",
+          "sha256",
+          "uploaded"
+        ],
         "additionalProperties": false,
-        "properties":{
-          "path":{"type":"string"},
-          "role":{"enum":["CRUISE_ANNOTATED","CRUISE_RAW","VERIFY_FRAME","VERIFY_ROI","ANOMALY_HEATMAP","META_LOG"]},
-          "bytes":{"type":"integer","minimum":0},
-          "sha256":{"type":"string"},
-          "uploaded":{"type":"boolean"}
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "CRUISE_ANNOTATED",
+              "CRUISE_RAW",
+              "VERIFY_FRAME",
+              "VERIFY_ROI",
+              "ANOMALY_HEATMAP",
+              "META_LOG",
+              "VERIFY_FRAME_AUX",
+              "CRUISE_VIDEO"
+            ]
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "uploaded": {
+            "type": "boolean"
+          }
         }
       }
     },
     "abort": {
-      "oneOf":[{"type":"null"},{
-        "type":"object",
-        "required":["at_state","reason","detail"],
-        "additionalProperties": false,
-        "properties":{
-          "at_state":{"enum":["SUSPECT","HALT_REQ","AIM","ZOOM","CAPTURE","VERIFY","PACK","RESUME"]},
-          "reason":{"enum":["STATE_TIMEOUT","SAFETY_EVENT","ESTOP","DRIVER_ERROR","POSE_INVALID","CLOUD_CANCEL"]},
-          "detail":{"type":"string","maxLength":256}
-        }}]
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "required": [
+            "at_state",
+            "reason",
+            "detail"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "at_state": {
+              "enum": [
+                "SUSPECT",
+                "HALT_REQ",
+                "AIM",
+                "ZOOM",
+                "CAPTURE",
+                "VERIFY",
+                "PACK",
+                "RESUME"
+              ]
+            },
+            "reason": {
+              "enum": [
+                "STATE_TIMEOUT",
+                "SAFETY_EVENT",
+                "ESTOP",
+                "DRIVER_ERROR",
+                "POSE_INVALID",
+                "CLOUD_CANCEL"
+              ]
+            },
+            "detail": {
+              "type": "string",
+              "maxLength": 256
+            }
+          }
+        }
+      ]
     }
   },
-  "allOf":[
-    {"if":{"properties":{"abort":{"type":"object"}},"required":["abort"]},
-     "then":{"properties":{"gain":{"properties":{"verify_success":{"const":false}}}}}}
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "abort": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "abort"
+        ]
+      },
+      "then": {
+        "properties": {
+          "gain": {
+            "properties": {
+              "verify_success": {
+                "const": false
+              }
+            }
+          }
+        }
+      }
+    }
   ],
-  "$defs":{
-    "snapshot":{
-      "type":"object",
-      "required":["confidence","pixel_density_px","zoom","est_distance_m","defect_class","l2_reading"],
+  "$defs": {
+    "snapshot": {
+      "type": "object",
+      "required": [
+        "confidence",
+        "pixel_density_px",
+        "zoom",
+        "est_distance_m",
+        "defect_class",
+        "l2_reading"
+      ],
       "additionalProperties": false,
-      "properties":{
-        "confidence":{"type":"number","minimum":0,"maximum":1},
-        "pixel_density_px":{"type":"number","minimum":0},
-        "zoom":{"type":"number","minimum":1,"maximum":3},
-        "est_distance_m":{"type":"number","exclusiveMinimum":0},
-        "defect_class":{"type":["string","null"]},
-        "l2_reading":{"type":["object","null"]}
+      "properties": {
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "pixel_density_px": {
+          "type": "number",
+          "minimum": 0
+        },
+        "zoom": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 3
+        },
+        "est_distance_m": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "defect_class": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "l2_reading": {
+          "$ref": "https://patrol.local/schemas/detection_event.schema.json#/$defs/reading",
+          "$comment": "D3：复用 IF-1 的完整定义（8 个字段 + kind 枚举 + additionalProperties:false）。原来只写 {\"type\":[\"object\",\"null\"]}，往 after.l2_reading 塞 {\"kind\":\"NO_SUCH_KIND\",\"junk\":1} 会被放行。"
+        },
+        "multiview_spread": {
+          "$comment": "A3：三视角读数极差（% FS），条件式辅视角启用时才有",
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        }
       }
     }
   }

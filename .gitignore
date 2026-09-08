@@ -24,3 +24,9 @@ cloud/patrol.db-wal
 cloud/patrol.db-shm
 .coverage
 htmlcov/
+
+# PPT 生成的中间产物（node 依赖与渲染出的 PDF/JPG）
+deliverables/node_modules/
+deliverables/_deck/node_modules/
+deliverables/*.pdf
+deliverables/slide-*.jpg

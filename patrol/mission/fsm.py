@@ -509,10 +509,20 @@ class MissionFSM:
         return []
 
     def _st_capture(self) -> list[Command]:
-        """A3：三种采集模式由 mission.capture.mode 决定。
+        """抓拍。变焦到 3× 之后景深变浅，没对上焦的图送进二级模型只会浪费一次
+        复核预算——所以 ZOOM 状态必须等到 focus = LOCKED 才进这里。
 
-        变焦到 3× 之后景深变浅，没对上焦的图送进二级模型只会浪费一次复核
-        预算——所以 ZOOM 状态必须等到 focus = LOCKED 才进这里。
+        **A3 的三种采集模式（conditional / burst / multiview）目前没有实现。**
+        本状态把抓拍委托给 ``capture_cb``，而 ``patrol/mission/node.py`` 构造
+        ``MissionNode`` 时不传这个回调，所以运行时这里直接转 VERIFY，图像由
+        perception 侧自己抓。``self.capture_mode`` / ``self.highlight_trigger`` /
+        ``VerifyContext.aux_frames`` / ``used_aux`` 因此都是只赋值不读取的死字段，
+        ``multiview_spread`` 也没有任何代码产出。
+
+        接口侧已经冻结（ICD v2.0 §7.2 的条件路径、``files[].role`` 的
+        ``VERIFY_FRAME_AUX``、``snapshot.multiview_spread``），**实现侧欠着**。
+        补的时候要跨进程：mission 判定 → 经网关下发 ±15° 的 PTZ_SET → perception
+        抓帧 → 回传读数算极差。留着这些字段是为了那天不用再动接口。
         """
         if self.capture_cb is None:
             self._goto(State.VERIFY, "")
