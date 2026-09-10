@@ -39,8 +39,16 @@ class YoloDetector(IDetector):
         p = self._paths.get(stage) or self._paths["CRUISE"]
         if not p.exists():
             raise FileNotFoundError(
-                "找不到权重 %s。先跑 training/train_detector.py，"
-                "或把 perception.detector 改回 synthetic 用合成检测器跑通全链路。" % p)
+                "找不到权重 %s（stage=%s）。\n"
+                "两级权重不在版本库里（.gitignore 忽略 *.pt 与 training/runs/），"
+                "全新 clone 必然缺它们。三条路选一条：\n"
+                "  1. 把 perception.detector 改回 synthetic —— 全链路照样跑通，"
+                "这是仓库默认；\n"
+                "  2. 已有权重就放到上面这个路径，见 "
+                "deliverables/甲-检测/artifacts/where.txt；\n"
+                "  3. 自己训：python -m training.train_detector --stage %s。\n"
+                "**不要改成缺权重自动退回 synthetic** —— 配置写着 yolo 却跑合成"
+                "检测器，报出去的指标就是假的。" % (p, stage, stage.lower()))
         from ultralytics import YOLO
         m = YOLO(str(p))
         self._models[stage] = m

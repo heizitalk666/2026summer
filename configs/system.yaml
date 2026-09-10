@@ -28,7 +28,16 @@ logging:
 # ---------------------------------------------------------------- 感知
 perception:
   fps: 10                   # 巡航态帧率。ICD §5.2：由跟踪连续性定，不是算力妥协
-  detector: yolo            # synthetic | yolo   （代码先行，权重就位后改这里）
+  # synthetic | yolo。**仓库默认 synthetic，改动请连同下面这段一起读。**
+  # 真权重（cruise_ft / verify_ft）确实训出来了、也确实接进过全链路，指标见
+  # docs/指标汇总表.md，但 .gitignore 忽略 *.pt 与 training/runs/，所以它们
+  # 不在版本库里。此处若填 yolo，全新 clone 会在 detector 首次推理时抛
+  # FileNotFoundError，tests/test_perception.py 与 test_e2e_stub.py 共 6 条直接红。
+  # 要切 yolo：先按 deliverables/甲-检测/artifacts/where.txt 把两个权重放到
+  # 下面 yolo.weights_* 指的路径，再改这一行。
+  # **不要给它加「缺权重就自动退回 synthetic」的兜底**——那会让配置写着 yolo、
+  # 实际跑的是合成检测器，报出去的指标就是假的。缺权重就该当场炸。
+  detector: synthetic
   model:
     cruise:  {name: yolo11s, conf_threshold: 0.25, quant: INT8}
     verify:  {name: yolo11m, conf_threshold: 0.60, quant: INT8}

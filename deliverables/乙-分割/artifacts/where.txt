@@ -1,3 +1,20 @@
+⚠ 先读这段（2026-09-10 复核补记）
+
+下面写的「两个文件都在本地工作树里」「已复制到 ...」指的是**写这份记录那台
+机器**，不是版本库。在全新 clone 上实际情况是：
+
+  deliverables/乙-分割/unet.pt      ❌ 不存在
+  deliverables/乙-分割/unet.onnx    ❌ 不存在
+  training/runs/seg/unet.{pt,onnx}  ❌ 不存在
+
+后果是 `pytest` 里 tests/test_segment.py 有 5 条 skip（「需要
+training/runs/seg/unet.onnx」）。这是缺权重，不是失败——但也意味着
+**needle IoU 0.812 / 0.778 在别人机器上复现不出来**，除非先拿到 unet.pt。
+
+npz 基线（pixel*.npz）确实在库里，那条路不受影响。
+
+---
+
 U-Net 权重（31 MB × 2，.gitignore 忽略 *.pt / *.onnx，不进版本库）
 
 **已于 2026-09-08 由乙经 QQ 传来，两个文件都在本地工作树里：**

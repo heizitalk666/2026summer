@@ -1,3 +1,17 @@
+# ⚠ 先读这段（2026-09-10 复核补记）
+#
+# 下面写的「已在本地工作树里」「已复制到 ...」指的是**写这份记录那台机器**，
+# 不是版本库。在全新 clone 上实际情况是：
+#
+#   deliverables/甲-检测/best.pt                 ✅ 在（19 MB，见下方说明为何绕过 .gitignore）
+#   deliverables/甲-检测/verify/weights/best.pt  ❌ 不存在
+#   training/runs/{cruise,verify}*/weights/*.pt  ❌ 不存在（.gitignore:19 忽略 training/runs/）
+#   artifacts/{cruise,verify}/best.onnx          ❌ 不存在（全仓 find -name "*.onnx" 零命中）
+#
+# 因此 configs/system.yaml 的 perception.detector 默认是 synthetic；填 yolo 会在
+# 首次推理时抛 FileNotFoundError。要真跑 yolo，得先另行拿到上面两个 .pt。
+# **这一条没解决之前，L1 那组指标在别人机器上复现不出来。**
+
 # 太大不进版本库的产物放哪
 #
 # 一行一个，格式：<文件名>  <链接或路径>  <大小>  <sha256 前 8 位>
