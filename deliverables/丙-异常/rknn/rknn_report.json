@@ -1,0 +1,54 @@
+{
+  "target": "rk3576",
+  "toolkit": "rknn-toolkit2 2.3.2",
+  "host": "WSL2 Ubuntu 26.04 x86_64, Python 3.12 (uv venv)",
+  "date": "2026-09-09",
+  "source_onnx": "training/runs/anomaly/padim_net{2,3}.onnx (丙交付)",
+  "calibration": {
+    "images": 100,
+    "source": "training/datasets/normal_patches/normal 796 张里等距抽样",
+    "note": "全部为正常样本，与 PaDiM 训练集同分布"
+  },
+  "preprocess": {
+    "convention": "onnx_smoke.json: bgr-uint8 -> float32 0-1 RGB 256x256",
+    "rknn_config": "mean_values=[0,0,0], std_values=[255,255,255], quant_img_RGB2BGR=False",
+    "note": "对账时 RKNN 收 uint8 HWC 原图由其自行归一化，ONNX 收 float32 NCHW 手工 /255。两边不可各自再归一化一次。"
+  },
+  "metric": "同一批 20 张图，RKNN(simulator) 与 ONNX(fp32) 的输出特征逐元素比较；PaDiM 的马氏距离直接建立在这些特征上",
+  "results": [
+    {
+      "model": "padim_net2", "quant": "fp", "role": "对照组",
+      "rknn_bytes": 1486456, "onnx_bytes": 2732483, "shrink_x": 1.84,
+      "out_shape": [1, 128, 32, 32], "n_eval": 20,
+      "cosine_mean": 0.999997, "cosine_min": 0.999997,
+      "rel_l1_mean": 0.00221, "abs_max": 0.008591
+    },
+    {
+      "model": "padim_net2", "quant": "int8", "role": "量化组",
+      "rknn_bytes": 820178, "onnx_bytes": 2732483, "shrink_x": 3.33,
+      "out_shape": [1, 128, 32, 32], "n_eval": 20, "build_s": 4.3,
+      "cosine_mean": 0.998603, "cosine_min": 0.998226,
+      "rel_l1_mean": 0.053957, "abs_max": 0.131805
+    },
+    {
+      "model": "padim_net3", "quant": "fp", "role": "对照组",
+      "rknn_bytes": 5719992, "onnx_bytes": 11128154, "shrink_x": 1.95,
+      "out_shape": [1, 256, 16, 16], "n_eval": 20,
+      "cosine_mean": 0.999999, "cosine_min": 0.999999,
+      "rel_l1_mean": 0.001476, "abs_max": 0.006257
+    },
+    {
+      "model": "padim_net3", "quant": "int8", "role": "量化组",
+      "rknn_bytes": 2973010, "onnx_bytes": 11128154, "shrink_x": 3.74,
+      "out_shape": [1, 256, 16, 16], "n_eval": 20, "build_s": 5.0,
+      "cosine_mean": 0.998899, "cosine_min": 0.998621,
+      "rel_l1_mean": 0.049553, "abs_max": 0.145735
+    }
+  ],
+  "conclusion": {
+    "conversion_faithful": "FP 对照组余弦 0.999997 / 0.999999，相对 L1 0.15-0.22 %，证明转换路径与预处理正确",
+    "int8_drop": "余弦 0.9986 / 0.9989，相对 L1 5.40 % / 4.96 %。因对照组已证明转换无误，这部分误差可干净地归给 INT8 量化",
+    "size": "INT8 相对 ONNX 缩小 3.33x / 3.74x",
+    "not_verified": "板端实测速度未验证——本次是 x86 模拟器（init_runtime(target=None)），不是 RK3576 真机 NPU。掉点数有效，速度数没有。"
+  }
+}

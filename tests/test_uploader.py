@@ -224,6 +224,50 @@ def test_gain_summary_must_be_grouped_by_verdict(node):
     assert abs(mixed) < 0.15
 
 
+def test_summary_counts_only_this_round(tmp_path):
+    """「一轮巡检小结」必须真的只算一轮。
+
+    ``evidence/`` 一个 run_id 一个目录、只增不删。无过滤地扫 ``*/*/manifest.json``
+    汇总的是**所有历史轮次**，于是上一轮的坏数据会永久拉低之后每一轮——实测
+    一轮 180 s 的干净跑被报成「25 个包、成功率 52.0 %」，而本轮实际只有 7 个包、
+    成功率 85.7 %，那 25 个是五个 run 目录之和。
+
+    这里造两轮：旧的一轮全失败、新的一轮全成功。不过滤时成功率被稀释成 50 %，
+    按 ``since`` 过滤后必须是干干净净的 100 %。
+    """
+    from patrol.tools.run_all import summarise
+
+    root = tmp_path / "evidence"
+
+    def put(run_id, eid, success):
+        d = root / run_id / eid
+        d.mkdir(parents=True)
+        (d / "manifest.json").write_text(json.dumps({
+            "verdict": {"result": "READING_OK" if success else "INCONCLUSIVE"},
+            "gain": {"verify_success": success, "delta_conf": 0.4 if success else -0.5,
+                     "pixel_density_ratio": 2.2 if success else 0.0}}),
+            encoding="utf-8")
+
+    put("20260905-205807-5ead", "e1", False)
+    put("20260905-205807-5ead", "e2", False)
+    put("20260906-100232-9736", "e3", True)
+    put("20260906-100232-9736", "e4", True)
+
+    cfg = Config.load(overrides={"uploader": {"evidence_dir": str(root)}})
+
+    # 旧行为：两轮混在一起，本轮的 100 % 被上一轮稀释成 50 %
+    assert summarise(cfg)["total"] == 4
+    assert summarise(cfg)["verify_success_rate"] == 0.5
+
+    s = summarise(cfg, since="20260906-100232")
+    assert s["total"] == 2
+    assert s["verify_success_rate"] == 1.0
+    assert s["runs"] == ["20260906-100232-9736"]
+    assert s["skipped_earlier_runs"] == 2
+    # 分组统计也不能漏进上一轮的 INCONCLUSIVE
+    assert set(s["by_verdict"]) == {"READING_OK"}
+
+
 def test_suppressed_events_do_not_become_evidence_packages(node):
     """被任务层抑制的可疑事件不出证据包。
 

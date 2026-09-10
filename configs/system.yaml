@@ -28,17 +28,25 @@ logging:
 # ---------------------------------------------------------------- 感知
 perception:
   fps: 10                   # 巡航态帧率。ICD §5.2：由跟踪连续性定，不是算力妥协
-  detector: synthetic       # synthetic | yolo   （代码先行，权重就位后改这里）
+  detector: yolo            # synthetic | yolo   （代码先行，权重就位后改这里）
   model:
     cruise:  {name: yolo11s, conf_threshold: 0.25, quant: INT8}
     verify:  {name: yolo11m, conf_threshold: 0.60, quant: INT8}
     nms_iou: 0.45
-    input_w: 640
-    input_h: 640
+    # 1280 而不是 640：巡航 zoom=1× 下目标只有 40–60 px，640 下指示灯置信度
+    # 中位仅 0.43（甲的 _probe_yolo_cruise 实测），1280 抬到 0.72+，表计最低
+    # 置信度 0.30→0.78。代价是推理变慢，但在 GPU 上仍远小于 100 ms 节拍。
+    input_w: 1280
+    input_h: 1280
   yolo:
-    weights_cruise: training/runs/cruise/weights/best.pt
-    weights_verify: training/runs/verify/weights/best.pt
-    device: cpu
+    # _ft = 公开集基线 + 合成渲染×3 混合微调 15 轮，治的是"真实集训出来的模型
+    # 在虚拟配电室里一个都检不出"这个域差距（甲实测：只用公开集时虚拟域检出
+    # 0 %，混合微调后 77–100 %）。真实 val 不退化：mAP50 0.9941 / 召回 0.9983。
+    weights_cruise: training/runs/cruise_ft/weights/best.pt
+    weights_verify: training/runs/verify_ft/weights/best.pt
+    # 本机是 RTX 3060 Laptop（6.4 GB）。没有 CUDA 时必须改回 cpu——
+    # 1280 输入在 CPU 上跑不进 100 ms 节拍。
+    device: 0
   tracker:
     iou_threshold: 0.3
     max_age_frames: 15
@@ -63,6 +71,12 @@ perception:
       occlusion: 0.10
     threshold: 0.75         # Q < 0.75 触发主动测量（方案书 §6.4）
     pixel_density_target: 120.0   # 由 0.5 % FS 精度反推（方案书 §5.3.2）
+    # 变焦瞄准 pixel_density_target × 这个系数，**不是正好瞄准它**。
+    # 瞄准值与 L2 的可读下限是同一个数时等于零余量：停车滑行、变焦量化、
+    # 检测框方差任何一项都会让实际密度掉到线下，L2 于是拒读、融合无读数可依。
+    # 实测切真 YOLO 后 6 个证据包的 p_after 全部落在 106–120 区间、一条读数
+    # 都没产出。1.15 覆盖实测最差 11 % 的欠量，且仍在 max_zoom 以内。
+    zoom_margin: 1.15
   # === L2 分割。读数的第二种实现路线，与几何法接同一个接口 ===
   #
   # 默认 builtin —— 不加载任何权重，读数走 reading/pointer.py 的几何法。
@@ -75,8 +89,14 @@ perception:
   # 用 bench_models 重新比一次再决定。
   segmenter:
     backend: builtin        # builtin | npz | onnx
+    # ⚠ weights 由 npz 与 onnx **两个后端共用**。切 backend 时必须同时改这一行，
+    #   否则就是拿 onnxruntime 去加载 pixel.npz（文件存在，exists() 拦不住）。
+    #   onnx 权重在 training/runs/seg/unet.onnx。
     weights: training/runs/seg/pixel.npz
     min_side_px: 40         # ROI 短边小于此不跑：逐像素分类没有意义
+    # ⚠ 必须是 16 的倍数：U-Net 四次下采样 + 跳连要求两边尺寸对得上。
+    #   250 / 300 会让每一帧推理失败并静默退回几何法。与 export_onnx 的
+    #   --seg-size 保持一致。
     input_size: 256         # 仅 onnx 后端用
   # === 第二条读数通路：OCR。读表面印着的量程/单位/位置牌，与标定先验对质 ===
   #
@@ -97,10 +117,28 @@ perception:
     dial_labels: 5          # 表盘上印几个数字标签（本项目渲染器是量程四等分）
   l3:
     enabled: true
-    model: efficientad_s      # 权重就位后启用；无权重时自动退回统计法
+    # 学习法用 PaDiM 标准版（每位置随机通道子集上的全协方差 + 收缩正则，
+    # 任务书点名）：训练集增广后（密度分层 + 复核几何 + 检测框抖动裁片，
+    # 共 796 张）同批评测误报 3.8 % / 漏报 3.3 %，统计法漏报 90.8 %。
+    # L3 只进人工复核队列不直接告警。权重缺失 / torch 未装自动退回统计法。
+    model: padim_s
+    weights: training/runs/anomaly/padim_cov.pt
     threshold: 0.55           # 异常分按"偏离正常分布几个 σ"计，除以 6 归一，
                               # 故 0.55 对应 3.3σ 的经典离群判据
     warmup: 30                # 少于这么多正常样本时一律判正常，避免冷启动误报
+    # L3 只在 ≥ 此像素密度的检出上打分：训练裁片 87 % 在 60 px 以上，更小的
+    # ROI 是分布外（打分前一律 Resize 到 256²，小 ROI 被拉伸，实测巡航态
+    # <60 px 的检出误报率 5.9 %、≥60 px 的 0 %）。读它的是 node._run_l3。
+    min_density_px: 60.0
+    # 过门后还能有多个检出，而单次打分与 ROI 大小无关（Resize 拉平了），
+    # 一帧两个就是双倍开销。巡航态只给密度最高的这么多个打分；复核态不受此
+    # 限（那一帧不在 100 ms 节拍上）。
+    #
+    # 修这两道闸之前：巡航态每帧 2.07 次打分 × 42.5 ms ≈ 88 ms，而 10 Hz 的
+    # 节拍总共只有 100 ms，抓帧/检测/质量评价全无预算——实测帧率塌到 5.6 fps。
+    # 单次打分稳态实测 42.5 ms（主干去重前）/ 51.6 ms（去重后，但当时整机渲染
+    # 也慢了一倍，两个数不同负载下测的，**都待在空载机器上复测**）。
+    max_per_frame: 1
 
 # ---------------------------------------------------------------- 任务层
 mission:

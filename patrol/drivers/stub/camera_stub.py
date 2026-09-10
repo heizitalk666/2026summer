@@ -88,10 +88,10 @@ class CameraStub(ICamera):
         pan, tilt, zoom = self._ptz.true_pose()
         return pose_xy_yaw, pan, tilt, zoom, self._chassis.status().speed_mps
 
-    def _render_frame(self) -> Frame:
+    def _render_frame(self, viewpoint=None) -> Frame:
         # 曝光开始时刻先取，渲染耗时才算进 capture_to_infer
         ts_mono, ts_utc = mono_ns(), utc_ms()
-        pose, pan, tilt, zoom, spd = self._viewpoint()
+        pose, pan, tilt, zoom, spd = viewpoint or self._viewpoint()
         img, meta = self._renderer.render(pose_xy_yaw=pose, pan_deg=pan,
                                           tilt_deg=tilt, zoom=zoom, speed_mps=spd)
         with self._lock:
@@ -122,15 +122,26 @@ class CameraStub(ICamera):
 
         每帧之间云台的残余抖动不同（ptz_stub 的 settle_jitter_deg），所以
         3 帧里挑最清晰的一帧确实有意义——这不是摆设。
+
+        **视点在连拍开始时取一次，整串共用。**连拍的定义就是"同一位姿"，
+        逐帧重取视点会踩到外部视点的 TTL：一串 n=3 / 150 ms 的连拍全长
+        (2×150 ms 睡眠 + 3 次渲染) 实测 520–550 ms，比 viewpoint_ttl_ms=500
+        还长，而连拍期间 perception 阻塞在这里、喂不进新的 IF-3。于是最后
+        一帧退回本进程那台**收不到任何指令**的云台（pan=0/zoom=1×），渲出
+        一张完全不同的走廊广角图；偏偏广角图边缘多、拉普拉斯方差更大，
+        run_verify 的 _sharpness 100 % 会挑中它，复核帧于是一个目标都没有，
+        证据包 after 快照为空、密度比恒为 0。同时 last_targets() 也只留最后
+        一帧的真值，与被选中的那一帧对不上——冻结视点后这两处一并对齐。
         """
         if not self._started:
             raise DriverNotReady("相机未 start()")
         import time
+        vp = self._viewpoint()
         out: list[Frame] = []
         for i in range(int(n)):
             if i:
                 time.sleep(max(0.0, interval_ms / 1000.0))
-            out.append(self._render_frame())
+            out.append(self._render_frame(vp))
         if len(out) != int(n):
             raise DriverError("连拍不足 %d 帧，实得 %d 帧" % (n, len(out)))
         return out

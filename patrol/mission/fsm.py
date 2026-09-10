@@ -139,6 +139,9 @@ class MissionFSM:
         self.servo_mode = str(cfg.get("mission.servo.mode", "pid")).lower()
         self.rate_ttl_ms = int(cfg.get("mission.servo.rate_ttl_ms", 300))
         self.p_min = float(cfg.get("perception.quality.pixel_density_target", 120.0))
+        # 变焦要瞄在判据线之上，否则任何损耗都会掉到线下让 L2 拒读。
+        # **必须与 perception 侧读同一个键**，两边算出的期望倍率要逐位相同。
+        self.zoom_margin = float(cfg.get("perception.quality.zoom_margin", 1.15))
         self.image_w = int(cfg.get("camera.width", 1920))
         self.image_h = int(cfg.get("camera.height", 1080))
         self.max_zoom = float(cfg.get("optics.max_zoom", 3.0))
@@ -312,12 +315,14 @@ class MissionFSM:
         if det is not None:
             self.ctx.defect_class = det.get("defect_class")
             self.ctx.before = _snapshot(det, (d["context"]["ptz"]["zoom"]))
-            # 按需变焦（差异清单 C4）：算出刚好达到 120 px 判据的倍率，
-            # 而不是一律顶到 3×——固定 3× 对近距离目标会过度放大导致出框
+            # 按需变焦（差异清单 C4）：按目标密度算倍率，而不是一律顶到 3×
+            # ——固定 3× 对近距离目标会过度放大导致出框。
+            # 瞄准的是 p_min 之上而不是正好 p_min，理由见 verify_zoom_target。
             p = float(det.get("pixel_density_px", 0.0))
             z = float(d["context"]["ptz"]["zoom"])
-            from patrol.scene.optics import zoom_for_density
-            self.ctx.target_zoom = zoom_for_density(z, p, self.p_min, self.max_zoom)
+            from patrol.scene.optics import verify_zoom_target
+            self.ctx.target_zoom = verify_zoom_target(
+                z, p, self.p_min, self.max_zoom, self.zoom_margin)
             # 记下触发那一刻的指向角。停车要 1.5–2.5 s，这期间车还要往前滑
             # 一米左右，画面边缘的目标可能已经划出去了；进到 AIM 才发现没有
             # 反馈量可用，就只能干等超时。有了它至少能先把云台摆回目标当时

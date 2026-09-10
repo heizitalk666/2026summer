@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""接口一致性校验。ICD §10.1 的七项 + 差异清单 D5 的第八项。
+"""接口一致性校验。ICD §10.1 的七项 + 两项增补。
 
     python -m patrol.tools.validate
 
@@ -14,8 +14,11 @@ D3 评审前这个脚本必须全绿。建议接进 CI，每次改 Schema 自动
   6. 比对 ICD 附录 D 内嵌的 Schema 与 schemas/ 下的文件是否一致
   7. 跑十一条反例，确认越界指令、协议外参数、自相矛盾的字段组合都被拦下
 
-第八项是差异清单 D5 的增补：
-  8. 网关硬编码常量 ↔ Schema 的 minimum/maximum 交叉比对
+第八、九项是后来补的：
+  8. 网关硬编码常量 ↔ Schema 的 minimum/maximum 交叉比对（差异清单 D5）
+  9. 云端地址单一真值：cloud.host/port ↔ uploader.cloud_url 必须一致。
+     两处各写一遍端口，改了一处就漂，而漂了的表现是「上传静默失败」。
+     这条是被一次真实故障逼出来的，见 check_cloud_endpoint 的说明。
 
 关于第 6 项：ICD 原文要求"逐字节一致"，但 markdown 围栏的缩进、行尾换行、
 编辑器的尾随空白都会让它误报，而这类误报会训练出"红了就手工改一下附录"的
@@ -332,6 +335,41 @@ def check_counterexamples(r: Report) -> None:
 
 
 # ---------------------------------------------------------------- 8
+def check_cloud_endpoint(r: Report) -> None:
+    """云端地址只有一个真值。**同一个端口不许写在两个地方。**
+
+    `configs/system.yaml` 里 `cloud.host` / `cloud.port` 决定服务端**监听**在哪，
+    而 `uploader.cloud_url` 决定证据包**发**到哪。两处各写一遍，改了一处就会漂。
+
+    漂了的后果是静默的：uploader 照常打包、照常重试、日志里只有一句
+    「部分文件上传失败」，而云端台账一条都收不到——看起来像网络抖动。
+
+    这条检查是被一次真实故障逼出来的：Windows 上 Hyper-V/WSL 启动时会随机
+    保留一段动态端口（实测 7953–8052），8000 落在里面时 uvicorn 报
+    `WinError 10013`「存取權限不足」而 netstat 显示端口空闲。绕过办法就是改
+    `cloud.port`——而那一改，`uploader.cloud_url` 就对不上了。
+    """
+    print(f"\n{YELLOW}[9] 云端地址单一真值（cloud.host/port ↔ uploader.cloud_url）{RESET}")
+    from urllib.parse import urlparse
+
+    from patrol.common.config import Config
+    cfg = Config.load()
+    host = str(cfg.get("cloud.host", "127.0.0.1"))
+    port = int(cfg.get("cloud.port", 8000))
+    url = str(cfg.get("uploader.cloud_url", "") or "")
+    if not url:
+        r.add("uploader.cloud_url 已配置", False, "为空——证据包无处可发")
+        return
+    u = urlparse(url)
+    u_port = u.port if u.port is not None else (443 if u.scheme == "https" else 80)
+    r.add("cloud_url 的端口 == cloud.port", u_port == port,
+          f"uploader.cloud_url={url} vs cloud.port={port}")
+    same_host = (u.hostname == host
+                 or {u.hostname, host} <= {"127.0.0.1", "localhost", "0.0.0.0"})
+    r.add("cloud_url 的主机 == cloud.host", same_host,
+          f"uploader 发往 {u.hostname}，服务端监听 {host}")
+
+
 def check_gateway_vs_schema(r: Report) -> None:
     print(f"\n{YELLOW}[8] 网关硬编码常量 ↔ Schema 范围交叉比对（差异清单 D5）{RESET}")
     for const_name, (lo, hi), fn, path in L.SCHEMA_CROSSCHECK:
@@ -365,7 +403,8 @@ def main() -> int:
     r = Report()
     for fn in (check_schemas_valid, check_examples, check_pixel_density,
                check_budget, check_timeouts, check_embedded_copies,
-               check_counterexamples, check_gateway_vs_schema):
+               check_counterexamples, check_cloud_endpoint,
+               check_gateway_vs_schema):
         try:
             fn(r)
         except Exception as e:                              # noqa: BLE001

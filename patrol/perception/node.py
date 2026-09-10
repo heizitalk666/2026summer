@@ -48,7 +48,10 @@ from patrol.perception.reading.nameplate import (cross_check_dial,
                                                  read_switch_text)
 from patrol.perception.reading.switch import read_switch_position
 from patrol.perception.tracker import IouTracker
-from patrol.scene.optics import (distance_from_bbox_height, pixel_density,
+from patrol.scene.optics import (PinholeCamera,
+                                 distance_from_bbox_height,
+                                 hfov_at_zoom,
+                                 pixel_density,
                                  vfov_from_hfov)
 
 def _sharpness(img) -> float:
@@ -97,6 +100,8 @@ class PerceptionNode:
         self.q_enabled = bool(self.qcfg.get("enabled", True))
         self.q_thr = float(self.qcfg.get("threshold", 0.75))
         self.p_min = float(self.qcfg.get("pixel_density_target", 120.0))
+        # 与 mission/fsm.py 读同一个键、走同一个函数，见 verify_zoom_target。
+        self.zoom_margin = float(self.qcfg.get("zoom_margin", 1.15))
         self.first_release = set(cfg.get("mission.first_release_classes", []))
 
         self.detector = build_detector(cfg, self.camera)
@@ -104,6 +109,10 @@ class PerceptionNode:
             iou_threshold=float(cfg.get("perception.tracker.iou_threshold", 0.3)),
             max_age=int(cfg.get("perception.tracker.max_age_frames", 15)))
         self.anomaly = build_anomaly(cfg)
+        # L3 打分的两道闸。见 _run_l3 的说明——**这两个键此前只写在配置里，
+        # 没有任何代码读**，L3 于是在巡航态对每个检出无条件打分。
+        self.l3_min_density = float(cfg.get("perception.l3.min_density_px", 60.0))
+        self.l3_max_per_frame = int(cfg.get("perception.l3.max_per_frame", 1))
         # 第四个模型：OCR。它只在复核期跑（见 ocr/rapid.py 的耗时说明），
         # 装不上时 build_ocr 返回 DisabledOcr，互证通路降级但链路不断。
         self.ocr = build_ocr(cfg)
@@ -264,17 +273,95 @@ class PerceptionNode:
                 "reading_confidence": float(np.clip(r.confidence, 0, 1)),
                 "roi": [float(max(0.0, v)) for v in det.bbox]}
 
-    def _priors_for(self, det: Detection) -> dict | None:
-        """取标定阶段录入的先验。真机上来自标定表，桩上来自场景配置。
+    #: 检测框与标定表投影框的 IoU 低于此值就认为"对不上任何已登记设备"。
+    #: 0.30 是把"框松一点/紧一点"放过、把"完全是另一个目标"拦下的分界。
+    PRIORS_IOU_MIN = 0.30
+
+    #: 变焦余量的类级默认。**放在类上而不是只在 __init__ 里赋值**，是因为
+    #: tests/test_verify_due.py 用的是自己搭的轻量 Node 桩（绕过 __init__ 只
+    #: 填 p_min / max_zoom），只在 __init__ 里设会让那些桩 AttributeError。
+    #: 真正的取值仍以 __init__ 从配置读到的为准。
+    zoom_margin = 1.15
+
+    def _priors_for(self, det: Detection, frame=None) -> dict | None:
+        """取标定阶段录入的先验（量程、扫过角、正常带）。
 
         **先验不含当前读数**（World.Target.priors 明确剔除了 value），
         所以拿它不构成偷看真值。
+
+        两条路，缺一不可：
+
+        1. ``source_target_id`` —— 合成检测器直接给出它画的是哪个目标，
+           查表即得。这条只有桩上成立。
+        2. **几何匹配** —— 真检测器（yolo / 将来的 rknn）只从像素出框，
+           ``source_target_id`` 恒为 ``None``（见 detector/yolo.py:77）。
+           这时按标定表里登记的目标位置投影到当前画面，再与检测框做 IoU
+           匹配。这正是真机上该做的事：设备装在哪是标定时就知道的，
+           车在哪、云台指哪是 IF-3 告诉你的，两者一投影就知道画面里这个框
+           **应该**是哪台设备。
+
+        **这条路缺席过，而且是静默的。**切到 ``detector: yolo`` 之后
+        ``_l2_read`` 第一行 ``if priors is None: return None`` 直接短路，
+        于是一条 L2 读数都产不出来、全部证据包落成 ``CONFIRMED_DEFECT``，
+        而日志里没有任何异常——实测 6/6 如此。读数精度是这个项目的核心指标，
+        这条通路空着等于核心指标在真检测器下不成立。
+
+        匹配不上就返回 ``None``，读数照旧不产出——**那是对的**：画面里出现
+        一台标定表里没有的设备时，系统不该凭空给它安一套量程。
         """
         world = getattr(self.camera, "world", None)
-        if world is None or det.source_target_id is None:
+        if world is None:
             return None
-        t = world.by_id(det.source_target_id)
-        return t.priors if t is not None else None
+        if det.source_target_id is not None:
+            t = world.by_id(det.source_target_id)
+            if t is not None:
+                return t.priors
+        return self._priors_by_projection(world, det, frame)
+
+    def _priors_by_projection(self, world, det: Detection, frame) -> dict | None:
+        """把标定表里的目标投影到当前画面，按 IoU 找出这个框对应哪一台。
+
+        用的位姿一律来自 IF-3（``_last_status``），与 ``_context`` 同源；
+        收不到 IF-3 时不猜，直接返回 None。
+
+        **不读 ``camera.last_targets()``。**那是渲染器的逐帧真值，
+        ``drivers/stub/camera_stub.py`` 明确写着只给桩内部的合成检测器与测试用，
+        感知节点通过 ICamera 只能拿到 Frame。这里走的是"已知设备位置 + 已知
+        自身位姿 → 投影"，真机上同样成立。
+        """
+        st = self._last_status
+        if st is None or frame is None:
+            return None
+        try:
+            pose, z = st["pose"], st["ptz"]
+            zoom = float(z["zoom"])
+            cam = PinholeCamera(
+                int(frame.width), int(frame.height),
+                hfov_at_zoom(self.hfov1x, zoom),
+                (float(pose["x_m"]), float(pose["y_m"]),
+                 float(world.camera_height_m)),
+                float(pose["yaw_deg"]), float(z["pan_deg"]), float(z["tilt_deg"]))
+        except (KeyError, TypeError, ValueError):
+            return None
+
+        bx1, by1, bx2, by2 = (float(v) for v in det.bbox)
+        area_d = max(1e-6, (bx2 - bx1) * (by2 - by1))
+        best, best_iou = None, 0.0
+        for t, uv in world.visible(cam, margin_px=max(40.0, frame.width * 0.05)):
+            if t.defect_class != det.defect_class:
+                continue                      # 类别对不上就不是同一台设备
+            tx1, ty1 = float(uv[:, 0].min()), float(uv[:, 1].min())
+            tx2, ty2 = float(uv[:, 0].max()), float(uv[:, 1].max())
+            ix = max(0.0, min(bx2, tx2) - max(bx1, tx1))
+            iy = max(0.0, min(by2, ty2) - max(by1, ty1))
+            inter = ix * iy
+            union = area_d + max(1e-6, (tx2 - tx1) * (ty2 - ty1)) - inter
+            iou = inter / union if union > 0 else 0.0
+            if iou > best_iou:
+                best, best_iou = t, iou
+        if best is None or best_iou < self.PRIORS_IOU_MIN:
+            return None
+        return best.priors
 
     def _expected_zoom(self, best_suspect, entries: list[dict],
                        cur_zoom: float) -> float:
@@ -290,7 +377,7 @@ class PerceptionNode:
         差一点就会早触发一拍，而早触发一拍就等于把整次复核废掉
         （verify_due 一命中就立刻发报文并清掉 event_id）。
         """
-        from patrol.scene.optics import zoom_for_density
+        from patrol.scene.optics import verify_zoom_target
         keep = float(getattr(self, "_event_target_zoom", 0.0) or 0.0)
         if best_suspect is None:
             return keep
@@ -304,8 +391,8 @@ class PerceptionNode:
             # 而状态机实际只下发 2.14，_zoom_settled 就永远不成立——复核干等到
             # 超时，全程没有任何报错。实测一轮 3 个证据包里废掉一个。
             return keep
-        return float(zoom_for_density(float(cur_zoom), p, self.p_min,
-                                      self.max_zoom))
+        return float(verify_zoom_target(float(cur_zoom), p, self.p_min,
+                                        self.max_zoom, self.zoom_margin))
 
     # ------------------------------------------------------------ OCR 互证
     def _l2_ocr(self, image, det: Detection, l2: dict | None,
@@ -425,7 +512,7 @@ class PerceptionNode:
             dist = float(dist) if dist is not None else distance_from_bbox_height(
                 d.bbox[3] - d.bbox[1], size_m, zoom, frame.width, self.hfov1x)
             p = pixel_density(frame.width, size_m, zoom, dist, self.hfov1x)
-            priors = self._priors_for(d)
+            priors = self._priors_for(d, frame)
             l2 = self._l2_read(frame.image, d, priors) if stage == "VERIFY" or \
                 p >= self.p_min else None
 
@@ -458,7 +545,10 @@ class PerceptionNode:
                 if best_suspect is None or prio > best_suspect[0]:
                     best_suspect = (prio, d, rule)
 
-        l3 = self._run_l3(frame, dets)
+        # 复核态那一帧不在 100 ms 节拍上（run_verify 是独占的一拍），过门的
+        # 检出全打；巡航态只打密度最高的 max_per_frame 个。见 _run_l3。
+        l3 = self._run_l3(frame, dets, out,
+                          limit=None if heavy else self.l3_max_per_frame)
         if heavy:
             # 四路证据到齐，交给仲裁层。逐条 track 各算一份——状态机锁的是
             # track_id，写死"最佳"那一个会在画面里有两块同类表时挑错。
@@ -602,15 +692,42 @@ class PerceptionNode:
             novelty=self._novelty(d.track_id),
             priority=float(np.clip(prio, 0.0, 1.0)), suppressed_by=None)
 
-    def _run_l3(self, frame, dets) -> dict | None:
-        """L3 只喂"看起来正常"的样本学习，对每个检出打分。
+    def _run_l3(self, frame, dets, entries, *, limit: int | None = None) -> dict | None:
+        """L3 只喂"看起来正常"的样本学习，对**过门的**检出打分。
 
         输出只允许进人工复核队列，不得直接告警（ICD §3.1）。
+
+        **两道闸，缺一不可，理由是两条不同的。**
+
+        1. ``min_density_px``（配置里写了但一直没人读）：目标在画面里张不到
+           这么多像素就不打分。权重是在 ≥60 px 的裁片上拟合的，更小的 ROI
+           是分布外输入——``PadimAnomaly`` 一律 ``Resize((256,256))``，小
+           ROI 被拉伸后送进主干，分数不可信（实测巡航态 <60 px 的检出上
+           误报率 5.9 %，≥60 px 上 0 %）。所以这道闸先是**正确性**闸，
+           省下的算力是附带的。
+        2. ``max_per_frame``：过门的检出还可能不止一个，而单次打分与 ROI
+           大小无关（同上，Resize 拉平了），一帧两个就是双倍开销。巡航态
+           只给密度最高的那一个打分——它是这一帧里最像训练分布的样本。
+           复核态传 ``limit=None``，过门的全打，因为那一帧不在 100 ms 节拍上。
+
+        没有这两道闸时：巡航态每帧 2.07 次打分 × 42.5 ms = 88 ms，10 Hz 的
+        节拍只有 100 ms，抓帧 + 检测 + 质量评价全部没有预算，实测帧率塌到
+        5.6 fps，整机负载抬高又把 grab_burst 顶过视点 TTL，复核成功率归零。
+
+        ``entries`` 是 process_frame 里与 ``dets`` 同序的输出条目，密度只算在
+        那里（``pixel_density_px``），Detection 对象上没有这个字段。
         """
         if self.anomaly is None or not dets:
             return None
+        cand = sorted(
+            ((float(e.get("pixel_density_px", 0.0)), i, d)
+             for i, (d, e) in enumerate(zip(dets, entries))
+             if float(e.get("pixel_density_px", 0.0)) >= self.l3_min_density),
+            key=lambda t: (-t[0], t[1]))
+        if limit is not None:
+            cand = cand[:max(1, int(limit))]
         worst = None
-        for d in dets:
+        for _p, _i, d in cand:
             res = self.anomaly.score(frame.image, d.bbox)
             if worst is None or res.anomaly_score > worst.anomaly_score:
                 worst = res

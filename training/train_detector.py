@@ -27,11 +27,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 
 STAGES = {
-    "cruise": dict(model="yolo11s.pt", epochs=120, imgsz=640, batch=16,
-                   conf=0.25, iou=0.5, name="cruise",
+    "cruise": dict(model="yolo11s.pt", epochs=120, imgsz=640, batch=4,
+                   conf=0.25, iou=0.5, name="cruise", workers=2,
                    note="保召回：conf 压到 0.25，NMS iou 放松，宁可多报不可漏报"),
-    "verify": dict(model="yolo11m.pt", epochs=150, imgsz=640, batch=8,
-                   conf=0.60, iou=0.45, name="verify",
+    "verify": dict(model="yolo11m.pt", epochs=150, imgsz=640, batch=4,
+                   conf=0.60, iou=0.45, name="verify", workers=2,
                    note="判准：conf 提到 0.60，车已停稳可用更大的模型"),
 }
 
@@ -43,11 +43,19 @@ def main() -> int:
     ap.add_argument("--device", default="cpu", help="cpu 或 0/0,1")
     ap.add_argument("--epochs", type=int, default=None)
     ap.add_argument("--project", default=str(ROOT / "runs"))
+    ap.add_argument("--weights", default=None,
+                    help="从指定权重微调（默认公开 yolo11s/11m.pt 从头训）")
+    ap.add_argument("--name", default=None,
+                    help="输出目录名（默认 stage 名；微调另存请用它，免得盖掉原权重）")
+    ap.add_argument("--resume", action="store_true",
+                    help="从 runs/<stage>/weights/last.pt 断点续训")
     a = ap.parse_args()
 
     cfg = dict(STAGES[a.stage])
     if a.epochs:
         cfg["epochs"] = a.epochs
+    cfg["model"] = a.weights or cfg["model"]
+    cfg["name"] = a.name or cfg["name"]
     data = Path(a.data)
     if not data.exists():
         print("找不到数据集描述 %s" % data)
@@ -61,10 +69,20 @@ def main() -> int:
         return 1
 
     print("阶段 %s：%s" % (a.stage, cfg["note"]))
-    model = YOLO(cfg["model"])
-    results = model.train(data=str(data), epochs=cfg["epochs"], imgsz=cfg["imgsz"],
-                          batch=cfg["batch"], device=a.device,
-                          project=a.project, name=cfg["name"], exist_ok=True)
+    if a.resume:
+        last = Path(a.project) / cfg["name"] / "weights" / "last.pt"
+        if not last.exists():
+            print("找不到断点 %s，从头训（去掉 --resume）" % last)
+            return 1
+        print("从断点续训：%s" % last)
+        model = YOLO(str(last))
+        model.train(resume=True)
+    else:
+        model = YOLO(cfg["model"])
+        results = model.train(data=str(data), epochs=cfg["epochs"], imgsz=cfg["imgsz"],
+                              batch=cfg["batch"], device=a.device,
+                              workers=cfg.get("workers", 8),
+                              project=a.project, name=cfg["name"], exist_ok=True)
 
     out = Path(a.project) / cfg["name"]
     metrics = {}

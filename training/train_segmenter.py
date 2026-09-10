@@ -28,6 +28,8 @@ import time
 from pathlib import Path
 
 import cv2
+
+from patrol.common import imio
 import numpy as np
 
 from patrol.perception.segment.pixel import (N_CLASS, N_FEAT, WORK,
@@ -79,8 +81,8 @@ def load_split(root: Path, split: str, rng: np.random.Generator, limit=None):
     X, Y = [], []
     n_roi = 0
     for im in imgs:
-        m = cv2.imread(str(root / "masks" / split / (im.stem + ".png")), 0)
-        img = cv2.imread(str(im))
+        m = imio.imread(root / "masks" / split / (im.stem + ".png"), 0)
+        img = imio.imread(im)
         if m is None or img is None or img.shape[:2] != m.shape[:2]:
             continue
         for sub_img, sub_m in crops_of(root, split, im.stem, img, m):

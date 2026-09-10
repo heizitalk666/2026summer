@@ -28,6 +28,8 @@ import time
 from pathlib import Path
 
 import cv2
+
+from patrol.common import imio
 import numpy as np
 import torch
 import torch.nn as nn
@@ -105,8 +107,10 @@ def collect_rois(root: Path, split: str) -> list[tuple[np.ndarray, np.ndarray]]:
     rois = []
     imgs = sorted((root / "images" / split).glob("*.jpg"))
     for im in imgs:
-        m = cv2.imread(str(root / "masks" / split / (im.stem + ".png")), 0)
-        img = cv2.imread(str(im))
+        # 走 imio：cv2.imread 对含中文的绝对路径静默返回 None，会把整个
+        # val 集悄悄跳空（实测 120 张全丢，报「一个含针 ROI 都没采到」）
+        m = imio.imread(root / "masks" / split / (im.stem + ".png"), 0)
+        img = imio.imread(im)
         if m is None or img is None or img.shape[:2] != m.shape[:2]:
             continue
         for sub_img, sub_m in crops_of(root, split, im.stem, img, m):
@@ -199,7 +203,30 @@ def _iou_from_preds(samples, pred_fn) -> dict:
 
 
 def _unet_pred_fn(model, size, device):
+    """评测用的前向。**必须 eval()，`no_grad()` 顶不了这个。**
+
+    这两件事管的不是一回事：``no_grad()`` 只关梯度，BN 仍然处在 train 模式，
+    于是 (1) 用的是**当前这一张图**的 batch 统计而不是 running stats，
+    (2) 每前向一次就改写一次 running_mean / running_var。
+
+    实测代价：同一张图 eval 与 train 两种模式的预测只有 **82.83 %** 一致；
+    拿 90 张 val ROI 跑一遍，``c1.conv.1.running_var`` 的相对漂移中位数是
+    **1.63**——不是小数点后几位，是量级。
+
+    后果有两层。评测那一层：这个函数出来的 IoU 不是部署时（eval / ONNX）
+    那个函数的 IoU，两者不可比。权重那一层：main() 在 load_state_dict(最佳权重)
+    之后、``torch.onnx.export`` 之前又跑了一遍 ``_iou_from_preds``，所以
+    **导出的 ONNX 里烤进去的 BN 统计已经被评测过程改写过**。
+
+    deliverables/乙-分割/artifacts/unet.json 里的 needle IoU 0.7784 就是在
+    这个缺陷下算出来的。修好之后那个数要重算，不能直接沿用。
+    ``eval()`` 要放在**每次调用里**，不能放在闭包创建处：闭包在训练循环开始
+    之前就建好了，而循环里每个 epoch 开头都会 ``model.train()``（第 293 行），
+    放外面的话 epoch 中途那次评测又会退回 train 模式。放里面是幂等的，
+    下一个 epoch 的 ``model.train()`` 会照常把它切回去。
+    """
     def pred_fn(img):
+        model.eval()
         im, _ = resize_pair(img, img, size)
         x = torch.from_numpy(im.astype(np.float32) / 255.0).permute(2, 0, 1)[None].to(device)
         with torch.no_grad():

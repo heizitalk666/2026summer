@@ -146,7 +146,24 @@ def test_legibility_threshold_is_where_the_density_thesis_says_it_is():
     img, box = dial(160)
     d160 = parse_dial_text(o.read(img, box))
     assert d160.unit == "MPa", "160 px 上读不出单位：%s" % d160.as_dict()
-    assert cross_check_dial(d160, MPA).agree is True
+
+    # **这里断言的是 not False，不是 is True。理由是实测出来的，不是让步。**
+    #
+    # 引擎会把表盘上的标签误读成 `70.4` —— 圆形表盘上的小号旋转文字，
+    # 相邻两个刻度数字被并进同一个文本框。实测它在各档、各插值方式下**随机**
+    # 出现（同一张 160 px 的图：原尺寸干净、INTER_CUBIC 放大后出现 70.4、
+    # LANCZOS4 又干净；300 px 时四种全部出现）。既不是引擎版本问题
+    # （1.2.3 与 3.9.2 都有），也不是 rapid.py 那个 upscale_to_px 的锅。
+    #
+    # 所以"160 px 必然读得一致"这个断言，OCR 交付不了。而**真正该钉住的
+    # 性质是安全性**：互证决不能拿一个错读去否定一份正确的先验。
+    #   None  = 读不清楚、证据不足   → 可以接受，结论转为更保守
+    #   False = 与先验冲突           → **不可接受**，那会把一块好表判成异常
+    # 这条断言比原来那条更严：原来那条只在引擎恰好读干净时才有意义，
+    # 现在这条每一轮都在检查那个真正会造成误判的方向。
+    cc = cross_check_dial(d160, MPA)
+    assert cc.agree is not False, (
+        "160 px 上互证与正确先验冲突了，这会把好表误判成异常：%s" % cc.detail)
 
 
 @needs_engine

@@ -50,17 +50,34 @@ def wait_http(url: str, timeout_s: float = 15.0) -> bool:
     return False
 
 
-def summarise(cfg) -> dict:
+def summarise(cfg, since: str | None = None) -> dict:
     """跑完之后从证据包目录汇总三项增益指标。
 
     **必须按 verdict 分组。**FALSE_ALARM 的 delta_conf 是负值（复核把一个
     0.41 的误检压到 0.05），与真缺陷混在一起算均值会接近零，看上去像复核
     没起作用——ICD §6.4 特意警告过这一点。
+
+    **必须只算本轮。**``evidence/`` 下一个 run_id 一个目录，只增不删，所以
+    无过滤地扫 ``*/*/manifest.json`` 汇总的是**开天辟地以来所有轮次**，而报告
+    抬头写的是「一轮巡检小结」。实测踩过：一轮 180 s 的干净跑报出「证据包
+    25 个、成功率 52.0 %」，而那 25 个是五个 run 目录之和，本轮实际只有 7 个、
+    成功率 85.7 %——**上一轮的坏数据会永久拉低之后每一轮**，直到有人手工清空
+    ``evidence/``。
+
+    ``since`` 传 ``YYYYMMDD-HHMMSS``（``run_all`` 起进程之前取的墙钟），只统计
+    run_id 时间戳不早于它的目录。run_id 是零填充的定长格式，字典序即时间序，
+    直接比字符串就够，不用解析成时间。``None`` 表示不过滤——测试里用的是
+    tmp 目录，本来就只有本轮的包。
     """
     root = Path(cfg.get("uploader.evidence_dir", "evidence"))
     by: dict[str, list] = {}
-    total = ok = 0
+    total = ok = skipped = l2_ok = 0
+    runs: set[str] = set()
     for mf in sorted(root.glob("*/*/manifest.json")):
+        run_dir = mf.parent.parent.name
+        if since is not None and run_dir[:len(since)] < since:
+            skipped += 1
+            continue
         try:
             m = json.loads(mf.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -68,10 +85,21 @@ def summarise(cfg) -> dict:
         v = m["verdict"]["result"]
         g = m["gain"]
         by.setdefault(v, []).append(g)
+        runs.add(run_dir)
         total += 1
         ok += 1 if g["verify_success"] else 0
+        # l2_yield：复核态产出读数的比例。ICD v2.1 把它提为判据，取代
+        # delta_conf——后者的上限被真模型的高置信度压到 ~0.1，够不到原来的
+        # +0.25（§6.4 有完整证据链）。**判据必须有人度量**，只写进文档不接
+        # 代码，就是又一个 min_density_px（那个死配置键让 L3 打爆了帧预算）。
+        if (m.get("after") or {}).get("l2_reading") is not None:
+            l2_ok += 1
     out = {"total": total,
            "verify_success_rate": round(ok / total, 4) if total else 0.0,
+           "l2_yield": round(l2_ok / total, 4) if total else 0.0,
+           "l2_readings": l2_ok,
+           "runs": sorted(runs),
+           "skipped_earlier_runs": skipped,
            "by_verdict": {}}
     real_d, real_n = 0.0, 0
     for v, gs in sorted(by.items()):
@@ -92,13 +120,21 @@ def print_report(cfg, summary: dict) -> None:
     print("=" * 68)
     print("证据包 %d 个，复核成功率 %.1f %%（目标 > 85 %%）"
           % (summary["total"], summary["verify_success_rate"] * 100))
+    print("L2 读数产出 %d/%d（%.1f %%，目标 > 80 %%）"
+          % (summary.get("l2_readings", 0), summary["total"],
+             summary.get("l2_yield", 0.0) * 100))
+    if summary.get("runs"):
+        print("本轮 run_id %s" % "、".join(summary["runs"]))
+    if summary.get("skipped_earlier_runs"):
+        print("（evidence/ 里另有 %d 个更早轮次的证据包，未计入本轮）"
+              % summary["skipped_earlier_runs"])
     if summary["by_verdict"]:
         print("\n%-20s %5s %12s %12s" % ("结论", "条数", "平均Δconf", "平均密度比"))
         for v, s in summary["by_verdict"].items():
             print("%-20s %5d %12.4f %12.4f"
                   % (v, s["n"], s["avg_delta_conf"], s["avg_density_ratio"]))
     d = summary["delta_conf_on_real_defects"]
-    print("\n真缺陷组 Δconf 均值 = %s（目标 > +0.25）"
+    print("\n真缺陷组 Δconf 均值 = %s（**记录项，非判据**，见 ICD v2.1 §6.4）"
           % ("%.4f" % d if d is not None else "本轮无真缺陷样本"))
     print("提醒：FALSE_ALARM 组的 Δconf 为负是正常的，"
           "与真缺陷混在一起算均值会接近零（ICD §6.4）")
@@ -157,6 +193,9 @@ def main() -> int:
 
     from patrol.common.config import Config
     cfg = Config.load(a.config)
+    # 在起任何进程之前取，因为 run_id 是 mission 启动时生成的（ICD §2.2），
+    # 一定不早于这一刻。小结据此只算本轮，不把历史轮次算进来。
+    since = time.strftime("%Y%m%d-%H%M%S")
     env = dict(os.environ, PYTHONPATH=str(REPO), PYTHONUNBUFFERED="1")
     if a.config:
         env["PATROL_CONFIG"] = a.config
@@ -225,7 +264,7 @@ def main() -> int:
                     p.kill()
                 procs.remove((n, p))
         cfg._d["_no_cloud"] = a.no_cloud       # noqa: SLF001
-        print_report(cfg, summarise(cfg))
+        print_report(cfg, summarise(cfg, since=since))
 
         lines, rc_out = casualty_report(casualties)
         for ln in lines:

@@ -1,0 +1,12 @@
+{
+  "stage": "cruise",
+  "conf_threshold": 0.25,
+  "nms_iou": 0.5,
+  "model": "training/runs/cruise/weights/best.pt",
+  "metrics": {
+    "mAP50": 0.9941394004614015,
+    "mAP50_95": 0.7407482881390032,
+    "precision": 0.9966784772341203,
+    "recall": 0.9983243554931275
+  }
+}

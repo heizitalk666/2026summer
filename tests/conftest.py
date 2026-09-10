@@ -6,7 +6,7 @@ from patrol.common.config import Config
 
 @pytest.fixture(scope="session")
 def cfg():
-    return Config.load()
+    return Config.load(overrides=_CHEAP_L3)
 
 
 @pytest.fixture()
@@ -18,9 +18,46 @@ def free_ports():
             "status": "tcp://127.0.0.1:%d" % (base + 2)}
 
 
+#: 单元测试默认用**零权重的统计法**做 L3，不加载 PaDiM。
+#:
+#: 三个理由，按重要性排：
+#:
+#: 1. **不能让单元测试依赖一个 83 MB 的权重文件。**`configs/system.yaml` 现在
+#:    是 `l3.model: padim_s` + `weights: training/runs/anomaly/padim_cov.pt`，
+#:    而那个文件不进版本库。别人 clone 下来跑 pytest，`build_anomaly` 会静默
+#:    退回统计法、测试照样全过——**等于这些用例从来没验过它们以为在验的后端**。
+#: 2. **它会把断言时长的用例挤挂。**PaDiM 每次打分 17 ms、构造 2.6 s，
+#:    四个测试文件反复构造。实测全套跑时 `test_events_pass_schema_and_meet_latency`
+#:    P95 从 49 ms 涨到 108 ms 而单独跑只有 49 ms——失败的是测量不是被测对象，
+#:    正是这个文件下面 `_retry` 那段注释说的情形。
+#: 3. 统计法构造 0.003 s、打分 0.6 ms，接口与 PaDiM 完全一致，
+#:    这些用例验的是**接口契约与降级行为**，不是异常检测的准确率。
+#:
+#: 要专门验 PaDiM 那一路的，自己传 overrides 覆盖回去（并对权重缺席 skip）。
+_CHEAP_L3 = {"perception": {"l3": {"model": "statistical", "weights": None}}}
+
+
+def _merge(*maps):
+    """浅合并 overrides，逐 key 深合并一层——够用且不引入依赖。"""
+    out: dict = {}
+    for m in maps:
+        for k, v in (m or {}).items():
+            if isinstance(v, dict) and isinstance(out.get(k), dict):
+                merged = dict(out[k])
+                for k2, v2 in v.items():
+                    if isinstance(v2, dict) and isinstance(merged.get(k2), dict):
+                        merged[k2] = {**merged[k2], **v2}
+                    else:
+                        merged[k2] = v2
+                out[k] = merged
+            else:
+                out[k] = v
+    return out
+
+
 @pytest.fixture()
 def cfg_ports(free_ports):
-    return Config.load(overrides={"bus": free_ports})
+    return Config.load(overrides=_merge(_CHEAP_L3, {"bus": free_ports}))
 
 
 # ---------------------------------------------------------------- 抗负载辅助

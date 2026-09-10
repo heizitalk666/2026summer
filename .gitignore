@@ -30,3 +30,21 @@ deliverables/node_modules/
 deliverables/_deck/node_modules/
 deliverables/*.pdf
 deliverables/slide-*.jpg
+
+# 交付原件的压缩包与解压副本。**内容已装进仓库对应位置**（脚本进 training/、
+# 权重进 training/runs/、ONNX 进 artifacts/），压缩包只作本地存档，不进库：
+# 丙那两个加起来 85 MB，超过 GitHub 50 MB 的告警线。
+# XiaoChe_APM32.zip 是早已跟踪的底盘固件，不受这条影响（gitignore 不会取消跟踪）。
+*.7z
+deliverables/**/丙-L3*.zip
+
+# 甲/丙/乙 交付里随包附的数据集副本。与 training/datasets/ 同一条政策：
+# 数据集不进版本库，位置写在各自的 where.txt 里。
+deliverables/乙-分割/train/
+
+# 甲的 ONNX 导出目录（*.onnx 已被上面挡住，这里连空目录一起挡）
+artifacts/
+
+# 答辩 PPT 的旧稿。deliverables/中期答辩.pptx 是现行版（9-05），这份是 9-04 的
+# 重复下载稿（文件名带 "(7)"），11.5 MB，留本地存档不进库。
+deliverables/中期答辩-旧稿*.pptx

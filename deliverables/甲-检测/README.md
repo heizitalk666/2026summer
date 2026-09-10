@@ -56,16 +56,18 @@ ICD 的 Δconf 增益模型假设**巡航态不确定**（合成基线：远景 
 
 ## 图
 
-![巡航训练曲线](figures/cruise_results.png)
+![巡航训练曲线](cruise_results.png)
 巡航 yolo11s 120 轮损失与 mAP 曲线（无泄漏数据集）。
 
-![巡航混淆矩阵](figures/cruise_confusion_matrix.png)
+![巡航混淆矩阵](cruise_confusion_matrix.png)
 三类目标（PRESSURE_GAUGE / INDICATOR_LIGHT / SWITCH_HANDLE）几乎无混淆。
 
-![复核 PR 曲线](figures/verify_PR_curve.png)
+![复核 PR 曲线](verify_PR_curve.png)
 复核 yolo11m 80 轮，三类 PR 曲线。
 
-其余见 `figures/`（verify_results / verify_confusion_matrix / cruise_PR_curve）。
+其余四张（`verify_results` / `verify_confusion_matrix` / `cruise_PR_curve` /
+`verify_PR_curve`）在本目录根下。`figures/` 里是巡航级的七张原始训练产物
+（`_cruise` 后缀），`verify/` 里是复核级 80 轮的完整训练目录。
 
 ## 交付物清单
 

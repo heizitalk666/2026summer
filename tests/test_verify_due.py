@@ -22,7 +22,7 @@ import pytest
 
 from patrol.common.config import Config
 from patrol.perception.node import PerceptionNode
-from patrol.scene.optics import zoom_for_density
+from patrol.scene.optics import verify_zoom_target, zoom_for_density
 
 
 class _Log:
@@ -41,6 +41,8 @@ class Node:
         self.cruise_zoom = cruise_zoom
         self.max_zoom = max_zoom
         self.p_min = p_min
+        # 与真节点同一个默认；两边必须走同一个 verify_zoom_target
+        self.zoom_margin = 1.15
         self.cruise_pans = (bearing, -bearing)
         self.cruise_tilt = tilt
         self.cruise_pose_tol_deg = tol
@@ -180,7 +182,10 @@ def test_expected_zoom_matches_what_the_fsm_will_command():
         track_id = 7
 
     got = n._expected_zoom((0.9, Det(), "CONF_BAND"), entries, 1.0)
-    want = zoom_for_density(1.0, 49.9, 120.0, 3.0)
+    # 走与两个调用点同一个函数：这条测试钉的是「perception 和 FSM 算出来
+    # 逐位相同」，不是某个具体公式。写死公式的话，加变焦余量这种
+    # 两边同步的改动会误报成回归。
+    want = verify_zoom_target(1.0, 49.9, 120.0, 3.0, 1.15)
     assert got == pytest.approx(want)
 
 

@@ -338,7 +338,13 @@ def test_pty_link_end_to_end(tmp_path):
 
     ACK 丢包是**按设计注入**的（2 %），所以这里给足重试次数：上层的约定
     本来就是靠超时发现并重发，而不是假设每条指令都到得了。
+
+    **伪终端是 POSIX 专有的**，Windows 上没有 ``termios``/``os.openpty``——
+    README 让 Windows 用户走 ``fakecar --tcp``，那条路由 `test_fakecar_tcp.py`
+    覆盖。所以这里 skip 而不是 fail：在 Windows 上红一条会让"全绿"这个
+    验收信号失效，而它其实什么问题都没说明。
     """
+    pytest.importorskip("termios", reason="伪终端是 POSIX 专有；Windows 走 --tcp")
     serial = pytest.importorskip("serial")       # noqa: F841
     from patrol.tools.fakecar import _PtyLink
 

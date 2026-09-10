@@ -52,18 +52,22 @@ def smoke(path: Path, *, want_out_ch: int | None = None,
     return True
 
 
-def export_detector(weights: Path, out: Path, imgsz: int) -> bool:
+def export_detector(weights: Path, out: Path, imgsz: int,
+                    half: bool = False) -> bool:
     try:
         from ultralytics import YOLO
     except ImportError:
         print("没装 ultralytics，跳过检测器导出（pip install ultralytics）")
         return False
     m = YOLO(str(weights))
-    p = Path(m.export(format="onnx", imgsz=imgsz, opset=12, simplify=False))
+    # half=True 导 FP16，体积约为 FP32 的一半，检测器 mAP 损失可忽略；
+    # RKNN 工具链最终量化 INT8，FP16 ONNX 是它的标准输入
+    p = Path(m.export(format="onnx", imgsz=imgsz, opset=12,
+                      simplify=False, half=half))
     out.parent.mkdir(parents=True, exist_ok=True)
     if p.resolve() != out.resolve():
         p.replace(out)
-    print("检测器导出到 %s" % out)
+    print("检测器导出到 %s%s" % (out, "（FP16）" if half else ""))
     return smoke(out, size=imgsz)
 
 
@@ -100,6 +104,8 @@ def main(argv=None) -> int:
     ap.add_argument("--check", default=None, help="只对已有的 .onnx 做冒烟推理")
     ap.add_argument("--out-dir", default="training/runs/onnx")
     ap.add_argument("--imgsz", type=int, default=640)
+    ap.add_argument("--half", action="store_true",
+                    help="导出 FP16 半精度，体积约减半（RKNN 量化前的标准格式）")
     ap.add_argument("--seg-size", type=int, default=256)
     a = ap.parse_args(argv)
 
@@ -112,7 +118,8 @@ def main(argv=None) -> int:
                     want_out_ch=N_CLASS if "seg" in a.check else None,
                     size=a.seg_size)
     if a.detector:
-        ok &= export_detector(Path(a.detector), outd / "detector.onnx", a.imgsz)
+        ok &= export_detector(Path(a.detector), outd / "detector.onnx",
+                              a.imgsz, half=a.half)
     if a.segmenter:
         if not a.seg_arch:
             raise SystemExit("--segmenter 需要同时给 --seg-arch")

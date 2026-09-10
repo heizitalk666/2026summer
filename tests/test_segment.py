@@ -240,3 +240,170 @@ def test_gauge_mask_ok_flag():
     m = np.zeros((8, 8), np.float32)
     m[4, 4] = 0.9
     assert GaugeMask(needle=m).ok
+
+
+# ---------------------------------------------------------------- onnx 后端
+#
+# 这一节以前是空白：19 条用例里没有一行碰过 OnnxSegmenter。而乙的比选结论
+# （「不启用学习法」）恰恰是拿 onnx 这条路跑出来的——CI 全绿并不能说明那条
+# 路还跑得通，比选就成了纸上谈兵。
+#
+# 前两条不需要权重文件，任何人 clone 下来都能跑；后两条要权重，缺了自动 skip。
+ONNX_W = "training/runs/seg/unet.onnx"
+
+
+def _has_onnx_weights() -> bool:
+    from pathlib import Path
+    return Path(ONNX_W).exists()
+
+
+def test_onnx_backend_with_npz_weights_fails_the_way_node_can_absorb(tmp_path):
+    """backend 切 onnx 却忘了改 weights —— 必须抛 node.py 兜得住的类型。
+
+    **这是最容易踩、后果最重的一次配错。**backend 和 weights 是两个字段，
+    而 npz 与 onnx 共用后者；configs/system.yaml 里 weights 显式写着
+    pixel.npz。所以"只把 backend 改成 onnx"会拿 onnxruntime 去加载 npz，
+    而 `path.exists()` 拦不住——文件确实在。
+
+    onnxruntime 原生抛的 InvalidProtobuf 既不是 ValueError 也不是
+    FileNotFoundError，而 perception/node.py 只捕这两类。不转换类型的话，
+    这个配错不是"warn 一句退回几何法"，是**整个 PerceptionNode 构造崩掉**。
+    """
+    pytest.importorskip("onnxruntime")
+    from patrol.perception.segment.onnx_seg import OnnxSegmenter
+
+    fake = tmp_path / "pixel.npz"
+    np.savez(fake, W=np.zeros((N_FEAT, N_CLASS), np.float32))
+    with pytest.raises((FileNotFoundError, ValueError)):
+        OnnxSegmenter(Config.load(), weights=str(fake))
+
+
+@pytest.mark.parametrize("size", [250, 300, 255])
+def test_onnx_input_size_must_be_multiple_of_16(size, tmp_path):
+    """input_size 不是 16 的倍数 —— 必须构造时就报，不能留到每帧静默失效。
+
+    U-Net 四次 2× 下采样，跳连要求两边尺寸对得上。250 这类尺寸会让推理炸在
+    Concat 上，而 segment() 是 `except: return None`，于是**每一帧都退回几何法，
+    node 日志却还在说「分割级联已启用」**——正是本文件开篇点名的头号风险。
+    """
+    pytest.importorskip("onnxruntime")
+    if not _has_onnx_weights():
+        pytest.skip("需要 %s" % ONNX_W)
+    from patrol.perception.segment.onnx_seg import OnnxSegmenter
+
+    cfg = Config.load(overrides={
+        "perception": {"segmenter": {"input_size": size}}})
+    with pytest.raises(ValueError, match="16"):
+        OnnxSegmenter(cfg, weights=ONNX_W)
+
+
+def dial_with_mask(px=220, value=0.85):
+    """与 dial() 逐像素对齐的真值掩膜。两者共用同一套几何参数（见 gauges.py）。"""
+    import cv2
+    img, box = dial(px, value=value)
+    from patrol.scene.gauges import render_pointer_gauge_mask
+    src = render_pointer_gauge_mask(512, value=value, range_min=0.0,
+                                    range_max=1.6, sweep_deg=270.0,
+                                    zero_offset_deg=-135.0, major_ticks=27)
+    small = cv2.resize(src, (px, px), interpolation=cv2.INTER_NEAREST)
+    return img, small, box
+
+
+def _dir_of(sel):
+    """一组布尔像素的方向合矢量：返回 (角度, R̄)。R̄ 接近 0 表示各向同性。"""
+    if sel.sum() < 8:
+        return None, 0.0
+    h, w = sel.shape
+    yy, xx = np.mgrid[0:h, 0:w]
+    cy, cx = (h - 1) / 2.0, (w - 1) / 2.0
+    ang = np.arctan2(yy[sel] - cy, xx[sel] - cx)
+    vx, vy = float(np.cos(ang).mean()), float(np.sin(ang).mean())
+    return float(np.arctan2(vy, vx)), float(np.hypot(vx, vy))
+
+
+def test_onnx_segmenter_channels_are_not_permuted():
+    """通道语义必须和 SEG_LABELS 对齐 —— 错位不会报错，只会让读数悄悄变差。
+
+    onnx_seg.py 按下标取：needle=p[...,2]、face=p[...,1]、ticks=p[...,3]。
+    换一份类别顺序不同的权重进来，代码照跑、形状照对、掩膜照出，只是 needle
+    里装的是刻度。**静态查不出来，只能靠行为反推。**
+
+    两条判据都以 render_pointer_gauge_mask 的真值为参照——它和 dial() 用的是
+    同一套几何常数，所以不需要在测试里重新推导角度约定（推错了会把好模型
+    判成错位，实测踩过）：
+
+    1. 真值针像素里，预测成 needle 的比例必须显著高于预测成 face / ticks 的
+    2. 预测 needle 掩膜的方向必须跟着真值针的方向转；盘面与刻度是近似各向
+       同性的，方向性应当明显更弱
+    """
+    pytest.importorskip("onnxruntime")
+    if not _has_onnx_weights():
+        pytest.skip("需要 %s" % ONNX_W)
+    from patrol.perception.segment.onnx_seg import OnnxSegmenter
+
+    seg = OnnxSegmenter(Config.load(), weights=ONNX_W)
+    hit, dirs = [], []
+    for value in (0.24, 0.56, 0.88, 1.20, 1.52):
+        img, gt, box = dial_with_mask(220, value=value)
+        x0, y0, x1, y1 = box
+        m = seg.segment(img[y0:y1, x0:x1])
+        assert m is not None and m.needle.shape == gt.shape
+
+        # 判据 1：真值针像素落到哪个预测通道
+        stack = np.stack([m.face, m.needle, m.ticks], axis=-1)   # 1 / 2 / 3
+        pick = stack.argmax(axis=-1)
+        tn = gt == 2
+        assert tn.sum() >= 8, "真值掩膜里没有针，value=%.2f" % value
+        frac = [float((pick[tn] == i).mean()) for i in range(3)]
+        hit.append((value, frac))
+
+        # 判据 2：方向性
+        want, _ = _dir_of(tn)
+        got, rbar = _dir_of(m.needle > 0.5)
+        other = [_dir_of(c > 0.5)[1] for c in (m.face, m.ticks)]
+        d = None if (want is None or got is None) else             abs((got - want + np.pi) % (2 * np.pi) - np.pi)
+        dirs.append((value, None if d is None else float(np.rad2deg(d)),
+                     rbar, other))
+
+    # 1：真值针像素预测成 needle 的比例，必须超过 face 与 ticks
+    for value, frac in hit:
+        assert frac[1] > frac[0] and frac[1] > frac[2], (
+            "value=%.2f 真值针像素落进 face/needle/ticks 的比例是 %r，"
+            "needle 不是最高——通道疑似错位" % (value, frac))
+
+    # 2：方向性。**只在针掩膜本身有方向可言时才判**——这份权重的针召回只有
+    # 0.4 上下（见 docs/指标汇总表.md 的 L2 一节），个别角度给出的是一团接近
+    # 各向同性的弱响应，R̄ 掉到 0.1。对那种情况谈「指向」没有意义，硬判会让这条
+    # 用例随权重版本随机翻红，而它本来要抓的是通道错位，不是精度。
+    #
+    # 阈值取 60° 而不是 30°：错位时的表现是 face 约 84°、ticks 约 127°（实测），
+    # 60° 能把「对」和「错位」干净分开，同时不把这份权重的松散判成错位。
+    strong = [(v, d, r, o) for v, d, r, o in dirs if d is not None and r >= 0.25]
+    assert len(strong) >= 3, (
+        "针通道在多数角度上弱到没有方向性，无法判错位：%r" % (dirs,))
+    med = float(np.median([d for _v, d, _r, _o in strong]))
+    assert med < 60.0, "针通道指向与真值差 %.1f°，通道可能错位：%r" % (med, dirs)
+    for _v, _d, rbar, other in strong:
+        assert rbar > max(other), (
+            "针通道方向性 %.3f 不强于盘面/刻度 %r，疑似错位" % (rbar, other))
+
+
+def test_onnx_cascade_actually_drives_the_reading():
+    """级联必须真的在用 —— 「不抛异常 + 形状对」远远不够。
+
+    input_size=300 那个 case 正是全部满足"不抛异常、掩膜形状对、值域在
+    [0,1]"却每帧静默失效。唯一能钉死的判据是读数管线自己报的 seg_used。
+    """
+    pytest.importorskip("onnxruntime")
+    if not _has_onnx_weights():
+        pytest.skip("需要 %s" % ONNX_W)
+    from patrol.perception.segment.onnx_seg import OnnxSegmenter
+
+    seg = OnnxSegmenter(Config.load(), weights=ONNX_W)
+    used = []
+    for value in (0.40, 0.85, 1.30):
+        img, box = dial(220, value=value)
+        r = read_pointer_gauge(img, box, priors=PRIORS, segmenter=seg,
+                               want_debug=True)
+        used.append(bool((r.debug or {}).get("seg_used")))
+    assert all(used), "掩膜没有驱动读数，级联是空转的：%r" % (used,)

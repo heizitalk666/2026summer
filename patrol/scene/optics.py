@@ -127,6 +127,38 @@ def zoom_for_density(cur_zoom: float, cur_px: float, want_px: float,
     return float(np.clip(cur_zoom * want_px / cur_px, 1.0, max_zoom))
 
 
+def verify_zoom_target(cur_zoom: float, cur_px: float, p_min: float,
+                      max_zoom: float = 3.0, margin: float = 1.15) -> float:
+    """复核该变焦到多少。**瞄准 p_min 之上，不是正好 p_min。**
+
+    原先两个调用点都是 ``zoom_for_density(z, p, p_min, max_zoom)``——
+    变焦瞄准的数，和 L2 判"能不能读"用的下限，**是同一个常数 120 px**
+    （``perception.quality.pixel_density_target``，见 node.py:586 的
+    ``if p < self.p_min: `` 跳过读数）。等于按零余量设计。
+
+    从"算出倍率"到"真的抓到那一帧"中间有好几处损耗：停车要 1.5–2.5 s，
+    这期间车还在滑行（实测 est_distance_m 5.04 → 5.40，退远 7 %）；
+    云台变焦有量化；检测框尺寸本身也有方差。任何一项都会让实际密度掉到
+    120 以下，于是 L2 拒读、融合无读数可依。
+
+    实测（切到真 YOLO 权重那一轮，6 个证据包）：
+        p_after = 106.5 / 112.5 / 112.7 / 115.3 / 116.1 / 119.5
+    **六个全部落在 120 下面**，最接近的只差 0.5 px；6 个包一条读数都没产出，
+    全部落成 CONFIRMED_DEFECT。合成检测器时代碰巧擦着过线，换成真检测器
+    （框的尺寸略有不同）就每次都差一点——这个缺陷一直在，只是没被触发。
+
+    margin 取 1.15：覆盖实测最差那次 11 % 的欠量，且 1.15×120 = 138 px 对应的
+    倍率仍在 max_zoom 以内（实测这一轮的目标倍率 1.95–2.50 → 2.24–2.87）。
+
+    **两个调用点必须共用这一个函数。**perception 靠自己算出来的期望倍率判断
+    状态机的 ZOOM 走完没有，两边差一位就会早触发一拍，而早触发一拍等于把
+    整次复核废掉（见 node.py 的 _suggest_zoom 说明）。分别乘一遍 margin
+    迟早会漂成两个值。
+    """
+    return zoom_for_density(cur_zoom, cur_px, float(p_min) * float(margin),
+                            max_zoom)
+
+
 def stub_effective_pixel_ratio(zoom: float, source_width: int = 3840,
                                out_width: int = 1920) -> float:
     """ptz_stub 的有效感光像素比 k = min(1, (source/out)/z)。ICD §9.2。

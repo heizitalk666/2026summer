@@ -59,11 +59,10 @@ SOURCES = [
            "三类状态量同源，场景/光照/视角一致，不需要做域适配——"
            "这是选它的主要理由", DATA / "distribution_room"),
     Source("paddlex_meter", "PaddleX 工业表计读数数据集",
-           "https://bj.bcebos.com/paddlex/examples/meter_reader/datasets/meter_seg.tar.gz",
-           "百度官方公开", "分割 374 训练 / 40 验证；检测另见 meter_det.tar.gz",
+           "https://paddlex.bj.bcebos.com/datasets/meter_det.tar.gz",
+           "百度官方公开", "检测 783 张 / 分割 414 张",
            "指针与刻度的像素级分割标注，公开数据里只有这一份。"
-           "本项目读数走几何解算不依赖它，主要用来做读数精度的交叉验证。"
-           "直链 wget 即可，不需登录",
+           "本项目读数走几何解算不依赖它，主要用来做读数精度的交叉验证",
            DATA / "paddlex_meter"),
 ]
 
@@ -95,76 +94,149 @@ def cmd_check() -> int:
     return 0 if ok else 1
 
 
-#: Roboflow 导出的文件名形如 ``<原名>_jpg.rf.<32位hash>.jpg``：同一张原图经
-#: 旋转/裁剪/调色增广出的多张副本，共享 ``.rf.`` 左边那一截，只有 hash 不同。
-_RF_SPLIT = ".rf."
-
-
-def source_key(filename: str) -> str:
-    """从文件名反推它来自哪张原图。
-
-    **这是查 train/val 泄漏的关键一步。**Roboflow 的增广副本文件名各不相同，
-    光比文件名一个重复都查不出来；但它们的 ``.rf.`` 左边那一截是同一个，
-    按那一截归组，跨 split 出现的组就是泄漏。
-
-    不含 ``.rf.`` 的名字（非 Roboflow 导出）退回用去扩展名的全名——
-    这时只有完全同名才算重复，不会误报。
+def _base_of(filename: str) -> str:
+    """Roboflow 导出的文件名形如 ``100_jpg.rf.18cced7321c2cccae85c42e8d4c5d76d.jpg``，
+    其中 ``.rf.`` 前面是原始文件名，后面是增广哈希。取前者作"同源分组"键，
+    确保同一张原图的所有增广副本全进同一个 split——否则 train/val 之间会有
+    增广泄漏，mAP 虚高。
     """
     stem = Path(filename).stem
-    if _RF_SPLIT in filename:
-        return filename.split(_RF_SPLIT, 1)[0]
-    return stem
+    return stem.split(".rf.")[0] if ".rf." in stem else stem
 
 
-def cmd_check_leak(root: Path) -> int:
-    """查 YOLO 目录里 train 与 val 有没有来自同一张原图的增广副本。
+#: ``_base_of`` 的公开名。**别删这个别名。**tests/test_prepare_dataset.py 与
+#: 任何外部调用方钉的都是 ``source_key``；甲的新版把它改成了私有的
+#: ``_base_of``，于是整个测试模块在 collection 阶段就 ImportError，
+#: 全套 512 条一条都跑不了（不是失败，是根本收集不起来）。
+source_key = _base_of
 
-    **为什么要单独查这个。**增广副本跨了 split，验证集里就有训练集的近邻，
-    mAP 会虚高而且不报错——它看起来只是"模型训得好"。实测巡航级 epoch 1
-    就有 mAP50 0.976，这个数必须先排除泄漏才敢往报告里写。
 
-    转换脚本本身不制造泄漏（``cmd_to_yolo`` 沿用 Roboflow 自己的划分），
-    所以查的是**上游数据集**带不带这个毛病。
+def cmd_check_leak(root: "Path | None" = None) -> int:
+    """检查**即将拿去训练的那份 YOLO 数据集**里有没有同源增广跨 split。
+
+    与 ``cmd_check_leak_raw`` 的区别：那个查的是 Roboflow 原始导出，这个查的是
+    ``--to-yolo`` 切完、真正要喂给 train_detector 的目录。**报告要基于后者**
+    ——重切之后原始导出怎么分的已经不重要了。
+
+    判据只能按「原图」而不能按文件名：Roboflow 把同一张原图的多个增广副本
+    导出成不同文件名，比文件名一个都查不出来。取 ``.rf.`` 前的基名做同源键。
+
+    返回 0 = 干净（打印 PASS），1 = 有泄漏或目录不存在（打印 FAIL）。
+    同时报告 **val 有多少比例被牵连**——那个数决定这批指标还能不能用。
     """
-    groups: dict[str, dict[str, list[str]]] = {}
-    counts = {}
-    for split in ("train", "val"):
-        d = root / "images" / split
-        if not d.exists():
-            print("找不到 %s，先跑 --to-yolo" % d)
+    from collections import defaultdict
+    src = Path(root) if root is not None else DATA / "yolo"
+    splits: dict[str, list[str]] = {}
+    for s in ("train", "val"):
+        d = src / "images" / s
+        if not d.is_dir():
+            print("找不到 %s —— 先跑 python -m training.prepare_dataset --to-yolo" % d)
             return 1
-        names = [f.name for f in sorted(d.iterdir())
-                 if f.suffix.lower() in _IMG_EXT]
-        counts[split] = len(names)
-        for n in names:
-            groups.setdefault(source_key(n), {}).setdefault(split, []).append(n)
+        splits[s] = [q.name for q in sorted(d.iterdir())
+                     if q.suffix.lower() in (".jpg", ".jpeg", ".png")]
 
-    shared = {k: v for k, v in groups.items() if len(v) == 2}
-    print("  train %d 张 / val %d 张，归并成 %d 张原图"
-          % (counts["train"], counts["val"], len(groups)))
+    by_split = {s: {source_key(n) for n in names} for s, names in splits.items()}
+    cross = sorted(by_split["train"] & by_split["val"])
 
-    if not shared:
-        print("  \033[32mPASS\033[0m  没有原图同时出现在 train 和 val 里")
+    print("=== YOLO 数据集同源泄漏检查 ===")
+    for s, names in splits.items():
+        print("  %-6s %4d 个文件 / %4d 个原图" % (s, len(names), len(by_split[s])))
+
+    if not cross:
+        print("  PASS —— train 与 val 没有共同原图")
         return 0
 
-    n_val_leaked = sum(len(v["val"]) for v in shared.values())
-    print("  \033[31mFAIL\033[0m  %d 张原图同时出现在两个 split 里，"
-          "牵连 val 的 %d/%d 张（%.1f %%）"
-          % (len(shared), n_val_leaked, counts["val"],
-             100.0 * n_val_leaked / max(1, counts["val"])))
-    for k, v in list(sorted(shared.items()))[:5]:
-        print("    %s\n      train: %s\n      val:   %s"
-              % (k, ", ".join(v["train"][:3]), ", ".join(v["val"][:3])))
-    if len(shared) > 5:
-        print("    …… 另有 %d 组" % (len(shared) - 5))
-    print("\n  验证集里有训练集的增广副本，mAP 会虚高。报告里要么按原图重新"
-          "划分后重训，要么如实写明这个局限。")
+    tainted = [n for n in splits["val"] if source_key(n) in set(cross)]
+    print("  FAIL —— %d 个原图同时出现在 train 与 val：" % len(cross))
+    for k in cross[:10]:
+        print("     %s" % k)
+    if len(cross) > 10:
+        print("     …… 另有 %d 个" % (len(cross) - 10))
+    print("  val 被牵连 %d/%d —— 这批 val 指标不能用，重跑 --to-yolo 按基名分组重切"
+          % (len(tainted), len(splits["val"])))
     return 1
 
 
-def cmd_to_yolo(out: Path) -> int:
-    """把原始标注统一到本项目的三类，输出标准 YOLO 目录。"""
+def cmd_check_leak_raw(root: "Path | None" = None) -> int:
+    """检查 **Roboflow 原始导出** 的 train/valid/test 之间，是否有同源增广跨 split。
+
+    Roboflow 默认会把同一张原图的不同增广副本分到不同 split——这就是增广泄漏，
+    验证集指标会被虚高。本脚本逐文件比对基名（``.rf.`` 前的部分），打印
+    跨 split 的基名数量与涉及的 split。
+    """
+    from collections import defaultdict, Counter
+    # root 可传：测试要对着 tmp_path 造的树跑，不能写死到真实数据集目录。
+    # 不传时保持原行为（查 SOURCES[0] 那份 Roboflow 原始导出）。
+    src = Path(root) if root is not None else SOURCES[0].target
+    if not src.exists():
+        print("找不到 %s，先跑 --list 按说明下载" % src)
+        return 1
+
+    splits: dict[str, set[str]] = {}
+    for s in ("train", "valid", "val", "test"):
+        d = src / s / "images"
+        if d.exists():
+            splits[s] = {p.name for p in d.iterdir()
+                         if p.suffix.lower() in (".jpg", ".jpeg", ".png")}
+
+    print("=== 原始 split 文件数 ===")
+    for s, names in splits.items():
+        print("  %-8s %5d" % (s, len(names)))
+
+    # 1) 完整文件名重复
+    print("\n=== 完整文件名跨 split 重复 ===")
+    any_full = False
+    keys = list(splits.keys())
+    for i in range(len(keys)):
+        for j in range(i + 1, len(keys)):
+            ov = splits[keys[i]] & splits[keys[j]]
+            if ov:
+                any_full = True
+                print("  %s & %s: %d 个重复" % (keys[i], keys[j], len(ov)))
+    if not any_full:
+        print("  ✓ 无重复")
+
+    # 2) 基名（同源）跨 split
+    base_map: dict[str, set[str]] = defaultdict(set)
+    for s, names in splits.items():
+        for n in names:
+            base_map[_base_of(n)].add(s)
+
+    cross = {b: sp for b, sp in base_map.items() if len(sp) > 1}
+    print("\n=== 同源（基名）跨 split ===")
+    print("  总基名数: %d，跨 split 基名数: %d" % (len(base_map), len(cross)))
+    if cross:
+        c = Counter()
+        for sp in cross.values():
+            for s in sp:
+                c[s] += 1
+        print("  涉及的 split: %s" % dict(c))
+        print("  前 10 个跨 split 基名:")
+        for b, sp in list(cross.items())[:10]:
+            print("    %s → %s" % (b, sorted(sp)))
+        print("\n  ⚠️  存在增广泄漏！同一张原图的增广副本跨了 train/valid。")
+        print("     用 --to-yolo 重切（按基名分组划分）即可消除。")
+        return 2
+    print("  ✓ 无同源泄漏")
+    return 0
+
+
+def cmd_to_yolo(out: Path, val_frac: float = 0.15, seed: int = 0) -> int:
+    """把原始标注统一到本项目的三类，输出标准 YOLO 目录。
+
+    **按基名分组划分**：把同一张原图的所有增广副本视为一组，整组要么进
+    train、要么进 val。这样 train/val 之间就不会有增广泄漏，指标可信。
+    Roboflow 原始的 train/valid 划分不保留——它本身就有泄漏。
+    """
+    import random
+    from collections import defaultdict
+
     out.mkdir(parents=True, exist_ok=True)
+    # 先清旧文件——否则重跑时新旧划分混在一起，会假"泄漏"
+    for sub in ("images/train", "images/val", "labels/train", "labels/val"):
+        d = out / sub
+        if d.exists():
+            shutil.rmtree(d)
     for split in ("train", "val"):
         (out / "images" / split).mkdir(parents=True, exist_ok=True)
         (out / "labels" / split).mkdir(parents=True, exist_ok=True)
@@ -188,42 +260,65 @@ def cmd_to_yolo(out: Path) -> int:
     unmapped = sorted({n for n in raw_names if n not in LABEL_MAP})
     if unmapped:
         print("以下原始类别没有映射规则，将被丢弃：%s" % ", ".join(unmapped))
-        print("若它们其实属于首版三类，请在 LABEL_MAP 里补上再跑一次")
 
-    n_copy = n_box = 0
+    # 收集所有 (img, lbl) 对，按基名分组
+    groups: dict[str, list[tuple[Path, Path]]] = defaultdict(list)
     for split in ("train", "valid", "val", "test"):
         img_dir = src / split / "images"
         lbl_dir = src / split / "labels"
         if not img_dir.exists():
             continue
-        dst_split = "val" if split in ("valid", "val", "test") else "train"
         for img in sorted(img_dir.iterdir()):
             if img.suffix.lower() not in (".jpg", ".jpeg", ".png"):
                 continue
             lbl = lbl_dir / (img.stem + ".txt")
+            groups[_base_of(img.name)].append((img, lbl))
+
+    # 按组划分 train/val（同组不拆）
+    rng = random.Random(seed)
+    bases = sorted(groups.keys())
+    rng.shuffle(bases)
+    n_val = int(len(bases) * val_frac)
+    val_bases = set(bases[:n_val])
+
+    print("总基名 %d，按 val_frac=%.2f 划分 → train %d 组 / val %d 组"
+          % (len(bases), val_frac, len(bases) - n_val, n_val))
+
+    n_copy = n_box = n_train_imgs = n_val_imgs = 0
+    for base in bases:
+        dst_split = "val" if base in val_bases else "train"
+        for img, lbl in groups[base]:
             lines_out = []
             if lbl.exists():
                 for line in lbl.read_text(encoding="utf-8").splitlines():
                     parts = line.split()
                     if len(parts) < 5:
                         continue
-                    raw = raw_names[int(parts[0])] if int(parts[0]) < len(raw_names) else ""
+                    raw = (raw_names[int(parts[0])]
+                           if int(parts[0]) < len(raw_names) else "")
                     mapped = LABEL_MAP.get(raw)
                     if mapped is None:
                         continue
-                    lines_out.append(" ".join([str(CLASSES.index(mapped))] + parts[1:]))
+                    lines_out.append(
+                        " ".join([str(CLASSES.index(mapped))] + parts[1:]))
                     n_box += 1
             shutil.copy2(img, out / "images" / dst_split / img.name)
             (out / "labels" / dst_split / (img.stem + ".txt")).write_text(
                 "\n".join(lines_out), encoding="utf-8")
             n_copy += 1
+            if dst_split == "val":
+                n_val_imgs += 1
+            else:
+                n_train_imgs += 1
 
     (out / "data.yaml").write_text(
         "path: %s\ntrain: images/train\nval: images/val\nnc: %d\nnames: %s\n"
         % (out.resolve(), len(CLASSES), json.dumps(CLASSES, ensure_ascii=False)),
         encoding="utf-8")
-    print("已整理 %d 张图、%d 个框 → %s" % (n_copy, n_box, out))
+    print("已整理 %d 张图（train %d / val %d）、%d 个框 → %s"
+          % (n_copy, n_train_imgs, n_val_imgs, n_box, out))
     print("类别：%s" % ", ".join(CLASSES))
+    print("划分方式：按基名分组，同源增广全进同一 split（无泄漏）")
     return 0
 
 
@@ -271,11 +366,7 @@ def _find_pairs(root: Path) -> list[tuple[Path, Path]]:
         ann = None
         for d in _ANN_DIRS:
             for ext in (".png", ".bmp"):
-                # PaddleX 的真实目录是 annotations/<split>/<stem>.png，与
-                # images/<split>/<stem>.jpg 同 split 并列。第一个候选覆盖这种
-                # 带 train/val 子目录的结构；后三个覆盖标注目录扁平摆放的情况。
-                for cand in (root / d / im.parent.name / (im.stem + ext),
-                             im.parent.parent / d / (im.stem + ext),
+                for cand in (im.parent.parent / d / (im.stem + ext),
                              im.parent / d / (im.stem + ext),
                              root / d / (im.stem + ext)):
                     if cand.exists():
@@ -303,6 +394,10 @@ def cmd_from_paddlex(src: Path, out: Path, *, background: str = "ignore",
     import cv2
     import numpy as np
 
+    # 中文路径下 cv2.imread/imwrite 会静默失败（返回 None/False，
+    # 不抛异常，而 os.path.exists 又是 True）。全仓库统一走 imio。
+    from patrol.common import imio
+
     if not src.exists():
         print("目录不存在：%s" % src)
         print("先下载：见 --list 里 paddlex_meter 那一条")
@@ -325,8 +420,8 @@ def cmd_from_paddlex(src: Path, out: Path, *, background: str = "ignore",
     seen: Counter = Counter()
     n_ok = n_bad = 0
     for im_p, ann_p in pairs:
-        img = cv2.imread(str(im_p))
-        ann = cv2.imread(str(ann_p), cv2.IMREAD_UNCHANGED)
+        img = imio.imread(str(im_p))
+        ann = imio.imread(str(ann_p), cv2.IMREAD_UNCHANGED)
         if img is None or ann is None:
             n_bad += 1
             continue
@@ -349,8 +444,8 @@ def cmd_from_paddlex(src: Path, out: Path, *, background: str = "ignore",
             m[ann == 0] = IGNORE
         split = "val" if rng.random() < val_frac else "train"
         stem = "paddlex_" + im_p.stem
-        cv2.imwrite(str(out / "images" / split / (stem + ".jpg")), img)
-        cv2.imwrite(str(out / "masks" / split / (stem + ".png")), m)
+        imio.imwrite(str(out / "images" / split / (stem + ".jpg")), img)
+        imio.imwrite(str(out / "masks" / split / (stem + ".png")), m)
         # PaddleX 的图本来就是单块表的紧裁剪，所以检测框就是整张图。
         # crops_of() 靠它切 ROI，缺了这个文件整帧都会被跳过。
         (out / "labels" / split / (stem + ".txt")).write_text(
@@ -379,28 +474,36 @@ def _seg_check(path: Path, img, m) -> None:
     """把标注画回图上。和 gen_synthetic.draw_check 同一个用意与同一套配色。"""
     import cv2
     import numpy as np
+
+    # 中文路径下 cv2.imread/imwrite 会静默失败（返回 None/False，
+    # 不抛异常，而 os.path.exists 又是 True）。全仓库统一走 imio。
+    from patrol.common import imio
     color = img.copy()
     color[m == 1] = (90, 140, 60)
     color[m == 2] = (60, 60, 235)
     color[m == 3] = (200, 160, 60)
     out = cv2.addWeighted(img, 0.45, color, 0.55, 0)
     out[m == IGNORE] = (out[m == IGNORE] * 0.55).astype(np.uint8)   # 忽略区压暗
-    cv2.imwrite(str(path), out)
+    imio.imwrite(str(path), out)
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="公开数据集获取与整理")
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--check", action="store_true")
-    ap.add_argument("--to-yolo", action="store_true")
     ap.add_argument("--check-leak", action="store_true",
-                    help="查 --to-yolo 产出的 train/val 有没有同一张原图的增广副本")
+                    help="检查 --to-yolo 切出来的数据集有没有同源增广跨 split")
+    ap.add_argument("--check-leak-raw", action="store_true",
+                    help="检查 Roboflow 原始导出的 train/valid/test 之间"
+                         "是否有同源增广跨 split（重切前的体检）")
+    ap.add_argument("--to-yolo", action="store_true")
     ap.add_argument("--from-paddlex", default=None, metavar="DIR",
                     help="把 PaddleX 分割集转成 train_segmenter 能吃的结构")
     ap.add_argument("--background", default="ignore",
                     choices=sorted(_BG_CHOICES),
                     help="PaddleX 的 background 映射成什么（默认忽略，不进损失）")
-    ap.add_argument("--val-frac", type=float, default=0.15)
+    ap.add_argument("--val-frac", type=float, default=0.15,
+                    help="val 集占比（--to-yolo 和 --from-paddlex 共用，默认 0.15）")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default=str(DATA / "yolo"))
     a = ap.parse_args()
@@ -413,10 +516,12 @@ def main() -> int:
         return cmd_list()
     if a.check:
         return cmd_check()
-    if a.to_yolo:
-        return cmd_to_yolo(Path(a.out))
+    if a.check_leak_raw:
+        return cmd_check_leak_raw()
     if a.check_leak:
-        return cmd_check_leak(Path(a.out))
+        return cmd_check_leak()
+    if a.to_yolo:
+        return cmd_to_yolo(Path(a.out), val_frac=a.val_frac, seed=a.seed)
     return cmd_list()
 
 

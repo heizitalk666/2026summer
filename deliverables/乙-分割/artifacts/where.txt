@@ -1,13 +1,93 @@
-U-Net 权重（太大，不进版本库，.gitignore 忽略 *.pt / *.onnx）
+U-Net 权重（31 MB × 2，.gitignore 忽略 *.pt / *.onnx，不进版本库）
 
-  unet.pt    训练/runs/seg/unet.pt     （PyTorch 权重，31 MB，训练产物）
-  unet.onnx  训练/runs/seg/unet.onnx   （ONNX 导出，31 MB，接 onnx_seg.py 用）
+**已于 2026-09-08 由乙经 QQ 传来，两个文件都在本地工作树里：**
 
-本机路径：
-  C:\Users\34393\Desktop\aaa\2026summer\training\runs\seg\unet.pt
-  C:\Users\34393\Desktop\aaa\2026summer\training\runs\seg\unet.onnx
+  unet.pt    deliverables/乙-分割/unet.pt     31,108,056 B  sha256 f064ab373530d4cf…
+  unet.onnx  deliverables/乙-分割/unet.onnx   31,049,950 B  sha256 46eb49ad9cc4c8ec…
 
-复现命令（在仓库根目录，需 torch + CUDA）：
-  python -m training.train_unet --data training/datasets/seg_combined --epochs 40
+已复制到 onnx_seg.py 的兜底默认路径：
 
-需要分享时把这两个文件传到网盘，这里把链接替换成网盘地址即可。
+  training/runs/seg/unet.onnx
+  training/runs/seg/unet.pt
+
+**注意：configs/system.yaml 目前并没有指向它。**第 77-78 行是
+    backend: builtin
+    weights: training/runs/seg/pixel.npz
+全仓库 configs/ 下没有任何一处指向 unet.onnx——这是**故意的**，
+乙的比选结论就是「不启用学习法」。要临时跑 onnx 这条路，backend 和
+weights **两个都得改**（只改 backend 会拿 onnxruntime 去加载 pixel.npz）。
+
+npz 基线权重本来就在库里，一并复制到位：
+
+  training/runs/seg/pixel.npz            ← artifacts/pixel_combined.npz 的副本
+  training/runs/seg/pixel_combined.npz
+  training/runs/seg/pixel_synth.npz
+
+ONNX 签名已核对，与 patrol/perception/segment/onnx_seg.py 顶部写死的约定一致：
+  输入  images  [1, 3, h, w]  float32
+  输出  logits  [1, 4, h, w]  float32
+  ir_version 7、producer pytorch
+
+---
+
+✅ **needle IoU 已完整复现（2026-09-10）。**
+
+乙于 2026-09-10 补交 `deliverables/乙-分割/train.7z`（6.86 MB），内含完整 val 划分：
+
+    images/val  120   （paddlex_* 59 + 合成 61）
+    masks/val   120
+    labels/val  120
+
+与 `split.json` 记的 `val: {total:120, synthetic:61, paddlex:59}` 完全一致。
+已解压到 `training/datasets/seg_combined/`。
+
+复现命令（**只评测、不重训**，几十秒）：
+
+    python -m training.eval_unet --json deliverables/乙-分割/artifacts/iou_repro.json
+
+结果（90 个含针 val ROI，与 `n_val_roi: 90` 对上）：
+
+    类别            U-Net(eval)   U-Net(train-BN)   交付记录    npz 基线
+    needle             0.8118         0.7784        0.7784      0.3837
+    face               0.5421         0.5560        0.5560
+    ticks              0.7074         0.7232        0.7232
+    background         0.9399         0.6208        0.6206
+
+**train-BN 那一列逐位复现了交付记录**，证明两件事：交付的数不是编的；
+而 `train_unet._unet_pred_fn` 缺 `model.eval()` 这个缺陷确实存在
+（`no_grad()` 只关梯度、不切 BN）。修好之后 needle 从 0.778 升到 **0.812**
+——这个缺陷一直在**低估**乙的模型。
+
+**对外报 0.812**，那才是 eval / ONNX / 部署实际走的语义。
+
+---
+
+**注意 `cv2.imread` 的中文路径陷阱。**本仓库路径含「新增資料夾」，
+`cv2.imread` 在 Windows 上走 ANSI API，对含非 ASCII 的**绝对路径**会
+静默返回 None（而 `os.path.exists` 返回 True）。第一次跑评测时 120 张 val 图
+被全部跳过，报「一个含针 ROI 都没采到」——查这种问题会一路查到数据集上去。
+现已统一走 `patrol/common/imio.py`，见那里的说明。
+
+---
+
+**val 划分（2026-09-10 乙补传）——`needle IoU 0.7784` 的复现前提**
+
+  deliverables/乙-分割/train/train/{images,labels,masks}/val/    各 120 个
+
+  其中 paddlex_* 59 组（真实图）+ 000xxx 61 组（合成图）= 120，
+  与 artifacts/split.json 记的 val 构成逐个对上。
+
+已复制到评测脚本读取的位置：
+
+  training/datasets/seg_combined/{images,masks,labels}/val/
+
+**两处都不进版本库**（数据集政策，见 .gitignore）。换机器要重新落位，
+就从 deliverables/乙-分割/train/train/ 复制到 training/datasets/seg_combined/。
+
+复现命令（只评测，不重训）：
+
+  python -m training.eval_unet
+
+⚠ 注意 `_unet_pred_fn` 原先缺 `model.eval()`（只有 `no_grad()`，那不切 BN），
+所以 unet.json 里的 0.7784 是在 **train 模式 BN** 下算出来的。该缺陷已修，
+`eval_unet` 会同时报 eval 与 train 两种模式的数以便对账——**部署精度看 eval 那列**。
