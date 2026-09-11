@@ -315,9 +315,9 @@ module.exports = function (pres, IMG) {
       "每条结论附 reasons 字段可逐级追溯，模型给不出这种依据",
       "六种结论各有测试用例", "3.8"],
      ["各模块接口对接\n与进度同步",
-      "五份 Schema 编码前冻结 + 57 项校验",
+      "五份 Schema 编码前冻结 + 59 项校验",
       "四人并行开发，联调时字段必须对得上，不能边写边改",
-      "validate 57 项全过，11 条反例全部被拦下", "3.4"],
+      "validate 59 项全过，11 条反例全部被拦下", "3.4"],
     ].forEach(r => rows.push([
       T.td(r[0], { bold: true, fontSize: 10, color: C.navy }),
       T.td(r[1], { fontSize: 10 }),
@@ -504,7 +504,7 @@ module.exports = function (pres, IMG) {
     s.addText("虚线框是硬件，实线框是进程。四个进程只有网关持有驱动实例，" +
       "其余三个即使写错代码也没有可以调用的驱动；网关又不加载任何模型，" +
       "所以感知或任务进程崩溃时它还活着，能把车辆按原路线送完。" +
-      "四条接口的报文格式在编码前就冻结成五份 JSON Schema——detection_event、control_command、command_ack、\n" + "status_report、evidence_package，字段全部 additionalProperties: false，配 57 项一致性校验。", {
+      "四条接口的报文格式在编码前就冻结成五份 JSON Schema——detection_event、control_command、command_ack、\n" + "status_report、evidence_package，字段全部 additionalProperties: false，配 59 项一致性校验。", {
       x: M + 0.28, y: RY, w: 11.85, h: 0.86, fontFace: F, fontSize: 10.2,
       color: C.navy, isTextBox: true, margin: 0, valign: "middle", lineSpacing: 14 });
     T.foot(s, "接口契约冻结于开题评审；改动走 ALLOWED_DRIFT 白名单，修改字段语义需全组重评审");
@@ -576,8 +576,8 @@ module.exports = function (pres, IMG) {
       s.addText(d, { x: M + 7.74, y: y + 0.36, w: 4.42, h: 0.68, fontFace: F, fontSize: 9.8,
         color: C.muted, isTextBox: true, margin: 0, valign: "top", lineSpacing: 13.5 });
     });
-    const gates = [["接口一致性校验　57 项", "python -m patrol.tools.validate"],
-                   ["自动化测试　507 项，覆盖率 75 %", "python -m pytest -q"],
+    const gates = [["接口一致性校验　59 项", "python -m patrol.tools.validate"],
+                   ["自动化测试　524 项，覆盖率 75 %", "python -m pytest -q"],
                    ["端到端实跑　300 s 一轮", "python -m patrol.tools.run_all --seconds 300"]];
     gates.forEach(([t, cmd], i) => {
       const y = y0 + 2.86 + i * 0.62;

@@ -4,8 +4,13 @@
 cd deliverables
 npm ci                                # 按 package-lock.json 装，版本钉死（^4.0.1）
 NODE_PATH=$(pwd)/node_modules node make_deck.js   # → deliverables/中期答辩.pptx
-cd .. && python deliverables/_deck/qa_layout.py deliverables/中期答辩.pptx   # 版面自检，必跑
+cd .. && pip install python-pptx      # qa_layout.py 要它，**不在 requirements.txt 里**
+python deliverables/_deck/qa_layout.py deliverables/中期答辩.pptx   # 版面自检，必跑
 ```
+
+> `python-pptx` 是**只有重出 PPT 才需要**的依赖，所以没进 `requirements.txt`
+> （那份是跑系统用的，装它纯属给每个人多下一个包）。不装的话最后一条会报
+> `ModuleNotFoundError: No module named 'pptx'`，看着像脚本坏了，其实是缺包。
 
 > **版本钉死是有原因的**：pptxgenjs 换个版本，字号度量与自动换行会变，
 > 一页排得下的字可能就排不下了——`qa_layout.py` 会抓到，但那时已经在改版式了。

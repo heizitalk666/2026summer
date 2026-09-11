@@ -86,7 +86,7 @@ READING_OK               7       0.4503       2.2204
 | 每个设计决定背后的理由 | [`docs/设计思想.md`](docs/设计思想.md) |
 | **对外口径**：每个数怎么来的、哪些没验证 | [`docs/指标汇总表.md`](docs/指标汇总表.md) |
 | 稳定性与断网降级的实测报告 | [`docs/测试报告-稳定性与降级.md`](docs/测试报告-稳定性与降级.md) |
-| 接口定义（冻结基线，D3 后升 v2.0） | [`docs/ICD-RK3576-PATROL-v2.0.md`](docs/ICD-RK3576-PATROL-v2.0.md) |
+| 接口定义（冻结基线，现行 v2.1，文件名仍是 v2.0） | [`docs/ICD-RK3576-PATROL-v2.0.md`](docs/ICD-RK3576-PATROL-v2.0.md) |
 | **D3 评审决议**：24 条议题的取舍与落点 | [`docs/一致性差异清单-方案书-ICD-v1.0.md`](docs/一致性差异清单-方案书-ICD-v1.0.md) |
 | 方案书按决议改了哪些地方 | [`docs/方案书修订记录.md`](docs/方案书修订记录.md) |
 | 交给硬件组的串口约定 | [`docs/底盘串口协议.md`](docs/底盘串口协议.md) |
@@ -119,7 +119,7 @@ patrol/
 cloud/          FastAPI + SQLite 台账、人工复核、模型版本登记
 configs/        system / scene / stub / waypoints / camera / real
 training/       合成数据集生成、检测/分割/异常训练、ONNX 与 RKNN 导出
-tests/          514 条用例（399 个测试函数，参数化展开后 514）
+tests/          524 条用例（398 个测试函数，参数化展开后 524）
 ```
 
 ---
@@ -212,14 +212,14 @@ python -m patrol.tools.viewer --live         # 预览窗口，画面上叠加指
 | 读数精度 | 基本误差 0.455 % FS、线性度 0.302 % FS（限值 0.5 / 0.4）达标，43 次独立标定的中位 |
 | 重复性 | **0.309 % FS**（限值 2026-09-10 由 0.3 修订为 0.4，39/43 合格）。剩 4 轮是量级失控，另有根因，见下 |
 | 云台控制 | 3× 变焦下超调 1.0 %、调节时间 1.10 s、稳态 8.4 px（限值 10 % / 1.5 s / 20 px）达标 |
-| 接口基线 | **ICD v2.0**（D3 决议 24 条全部落地），报文 `schema_version` 2.0.0 |
+| 接口基线 | **ICD v2.1**（v2.0 落地 D3 决议 24 条；v2.1 把 `delta_conf` 降为记录项、加派生指标 `l2_yield`）。报文 `schema_version` 仍是 **2.0.0**——v2.1 没动任何线上字段，见 ICD 的修订记录 |
 | 标定与整定记录 | 五点标定 + PID 阶跃响应已出（方案书 §11.1 交付物，此前覆盖率 0 %） |
 | 模型版本管理 | 云端已登记 **5 条**（此前 0 条），`register_models` 可复现 |
 | A3 条件式辅视角 | **接口预留、首版不实现**（已定案）。`VERIFY_FRAME_AUX` 与 `multiview_spread` 已进 Schema 并过校验，证据包格式不会因补它而变；当前走默认的单视角连拍 3 帧。口径见 [`docs/催办清单.md`](docs/催办清单.md) 第五节 |
 | 识别 | 四路模型（检测 / 分割 / OCR / 异常）+ 显式仲裁全部在跑，见 [`docs/多模型协同.md`](docs/多模型协同.md) |
 | OCR 互证 | 已在跑真模型（RapidOCR，离线自带权重）；实测 90 px 以上可读，误判冲突全档为 0 |
 | 合成数据集 | 检测框 / 分割掩膜 / OCR / L3 正常集一次产出，掩膜与图像逐像素对齐 |
-| 测试 | 514 条用例（508 passed / 6 skipped），`validate` 59 项全绿。6 条 skip 是缺 `unet.onnx`（5）与 L3 未启用（1），不是失败 |
+| 测试 | 524 条用例（518 passed / 6 skipped），`validate` 59 项全绿。6 条 skip 是缺 `unet.onnx`（5）与 L3 未启用（1），不是失败 |
 | YOLO 权重 | ✅ 两级真权重已训出并接进过全链路（`cruise_ft` / `verify_ft`）。无泄漏真实 val：mAP50 0.9941、漏检 0.168 / 0.185 %；RTX 3060 单帧 22 / 43 ms @1280。⚠ **权重不在版本库里**（`.gitignore` 忽略 `*.pt`），所以仓库默认 `detector: synthetic`；要复现上面这组数，先按 `deliverables/甲-检测/artifacts/where.txt` 放好权重再改配置 |
 | RKNN 上板 | 转换与 INT8 掉点**已完成**（相对 L1 5.4 / 5.0 %，见 `deliverables/丙-异常/rknn/`）；只剩上板测速等硬件 |
 
