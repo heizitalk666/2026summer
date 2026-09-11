@@ -17,6 +17,20 @@ CheckResult = tuple[bool, str | None, str | None]   # (ok, reject_code, detail)
 _OK: CheckResult = (True, None, None)
 
 
+def _num(value, digits: int) -> str:
+    """把越界值格式化进 reject_detail，**非数值也不许抛**。
+
+    ICD §4.6 钉死了拒绝理由的格式（`tests/test_gateway.py` 逐字比对
+    "CREEP_FORWARD.distance_m=1.200 exceeds [0.05,0.50]"），所以数值仍按
+    %.3f / %.2f 走。但拼这条消息的地方原先写的是 float(v)——in_range 已经
+    判它越界了，格式化时再 float() 一次，非数值就在这里抛出去，
+    等于把异常从判定挪到了措辞上，一样绕过 _reject、一样不留审计。
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return repr(value)
+    return "%.*f" % (digits, float(value))
+
+
 def check_whitelist(cmd: dict, *, allow_ptz_rate: bool) -> CheckResult:
     """第一层：AI 侧能表达什么。
 
@@ -62,6 +76,16 @@ def _check_ptz_rate_shape(cmd: dict) -> CheckResult:
     extra = set(p) - need
     if extra:
         return False, "SCHEMA_INVALID", "多余字段 %s" % ", ".join(sorted(extra))
+    # 类型要在这里查。PTZ_RATE 是 A1 增补，**不在冻结 Schema 里**，所以
+    # validate_structure 这一层兜不住它——别的指令靠 JSON Schema 挡住
+    # "pan_dps": "abc"，PTZ_RATE 没人挡。漏了的话 check_range 会在
+    # float("abc") 上抛 ValueError，绕过 _reject，审计日志里什么都不留。
+    # bool 要单独挡：isinstance(True, int) 在 Python 里为真，JSON 的 true 不是数。
+    for k in sorted(need):
+        v = p.get(k)
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            return False, "SCHEMA_INVALID", (
+                "PTZ_RATE.%s 必须是数值，收到 %r" % (k, v))
     return _OK
 
 
@@ -91,8 +115,8 @@ def check_range(cmd: dict, *, known_waypoints: frozenset[str]) -> CheckResult:
             return False, "PARAM_MISSING", "缺少 distance_m"
         if not L.in_range(d, L.CREEP_DISTANCE_M):
             return False, "PARAM_OUT_OF_RANGE", (
-                "CREEP_FORWARD.distance_m=%.3f exceeds [%.2f,%.2f]"
-                % (float(d), *L.CREEP_DISTANCE_M))
+                "CREEP_FORWARD.distance_m=%s exceeds [%.2f,%.2f]"
+                % (_num(d, 3), *L.CREEP_DISTANCE_M))
     elif c == "GOTO_OBSERVE":
         wp = p.get("waypoint_id")
         if wp not in known_waypoints:
@@ -102,8 +126,8 @@ def check_range(cmd: dict, *, known_waypoints: frozenset[str]) -> CheckResult:
             return False, "PARAM_MISSING", "缺少 tolerance_m"
         if not L.in_range(tol, L.GOTO_TOLERANCE_M):
             return False, "PARAM_OUT_OF_RANGE", (
-                "GOTO_OBSERVE.tolerance_m=%.3f exceeds [%.2f,%.2f]"
-                % (float(tol), *L.GOTO_TOLERANCE_M))
+                "GOTO_OBSERVE.tolerance_m=%s exceeds [%.2f,%.2f]"
+                % (_num(tol, 3), *L.GOTO_TOLERANCE_M))
     elif c == "PTZ_SET":
         for key, bounds in (("pan_deg", L.PTZ_PAN_DEG), ("tilt_deg", L.PTZ_TILT_DEG),
                             ("zoom", L.PTZ_ZOOM)):
@@ -112,7 +136,8 @@ def check_range(cmd: dict, *, known_waypoints: frozenset[str]) -> CheckResult:
                 return False, "PARAM_MISSING", "缺少 %s" % key
             if not L.in_range(v, bounds):
                 return False, "PARAM_OUT_OF_RANGE", (
-                    "PTZ_SET.%s=%.3f exceeds [%.1f,%.1f]" % (key, float(v), *bounds))
+                    "PTZ_SET.%s=%s exceeds [%.1f,%.1f]"
+                    % (key, _num(v, 3), *bounds))
         if p.get("speed") not in L.PTZ_SPEEDS:
             return False, "PARAM_OUT_OF_RANGE", "PTZ_SET.speed=%r 不在允许值内" % p.get("speed")
     elif c == "PTZ_RATE":
@@ -120,7 +145,8 @@ def check_range(cmd: dict, *, known_waypoints: frozenset[str]) -> CheckResult:
             v = p.get(key)
             if not L.in_range(v, bounds):
                 return False, "PARAM_OUT_OF_RANGE", (
-                    "PTZ_RATE.%s=%.2f exceeds [%.1f,%.1f]" % (key, float(v), *bounds))
+                    "PTZ_RATE.%s=%s exceeds [%.1f,%.1f]"
+                    % (key, _num(v, 2), *bounds))
         if not L.in_range(p.get("ttl_ms"), L.PTZ_RATE_TTL_MS):
             return False, "PARAM_OUT_OF_RANGE", (
                 "PTZ_RATE.ttl_ms=%s exceeds [%d,%d]" % (p.get("ttl_ms"), *L.PTZ_RATE_TTL_MS))

@@ -182,7 +182,14 @@ class PerceptionNode:
         from pathlib import Path
         self.evidence_root = Path(cfg.get("uploader.evidence_dir", "evidence"))
         self._cruise_ring: list = []
-        self._ring_max = int(cap.get("clip_ring_frames", 40))
+        # 触发前回放的长度（差异清单 B3）。**单一真值是 uploader.video.pre_seconds。**
+        # 此处原先读 mission.capture.clip_ring_frames——那个键在 configs 里根本
+        # 不存在，于是永远走 40 帧的兜底；而 configs 里真正写着的
+        # uploader.video.pre_seconds / post_seconds 又没有任何代码读。
+        # 两边各说各的，实测出来的片段是 4.0 s，配置上写的是 3.0 s。
+        _vid = cfg.get("uploader.video", {}) or {}
+        self._ring_max = max(1, int(round(float(_vid.get("pre_seconds", 3.0))
+                                          * float(self.fps))))
         self._last_status: dict | None = None
         self._running = False
 

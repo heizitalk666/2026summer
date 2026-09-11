@@ -263,7 +263,16 @@ uploader:
   # === B3：证据包视频。任务书要求"图像、视频、定位、时间和识别结果" ===
   video:
     enabled: true
+    # 触发前回放的长度。**这是片段长度的单一真值**，perception 按
+    # pre_seconds × perception.fps 定环形缓冲的帧数（node.py 的 _ring_max）。
+    # 2026-09-11 前这个键是死的：代码读的是 mission.capture.clip_ring_frames，
+    # 而那个键在 configs 里根本不存在，于是一直走 40 帧兜底 —— 配置写 3.0 s、
+    # 实际出 4.0 s。现已接上。
     pre_seconds: 3.0
+    # ⚠ **这一项目前不生效。**触发后继续录 2 s 需要检出之后再攒帧、并把落盘
+    #   推迟到攒完，而 save_cruise_evidence 是在检出那一帧同步落盘的。
+    #   当前片段 100 % 是触发前的回放，没有任何触发后画面。
+    #   要补它得改 perception 的落盘时序，不是加一行 if。
     post_seconds: 2.0
     fps: 10
   retention:

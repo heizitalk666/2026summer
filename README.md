@@ -142,7 +142,7 @@ pkill -f patrol.mission.node
 # 注入安全事件，正在进行的复核 200 ms 内中止
 pytest tests/test_fsm.py -k safety -v
 
-# 关掉增益调度，3× 变焦下超调从 0.9 % 变成 47.6 %
+# 关掉增益调度，3× 变焦下超调从 1.0 % 变成 42.7 %
 python -m patrol.tools.tune_pid --out out/pid --compare-gain-schedule
 ```
 

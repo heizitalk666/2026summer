@@ -103,7 +103,18 @@ def in_range(value: float, bounds: tuple[float, float]) -> bool:
     截成 0.5 m 照常执行，联调时看不出问题，等到某次截断逻辑失效就出事。
     """
     lo, hi = bounds
-    return lo <= float(value) <= hi
+    # 非数值一律判为越界，**不抛异常**。
+    # 网关的五项校验在 node.handle_command 里没有 try 包着（只有 _dispatch 有），
+    # 这里抛出去会绕过 _reject —— 于是既不写审计日志、也不发 ILLEGAL_COMMAND、
+    # 回给对面的还是一条没有 result/checks 的残缺 ACK（bus.Replier 的兜底）。
+    # 越界指令必须留痕，这是网关存在的理由，所以宁可在这里判 False。
+    # bool 单独挡掉：Python 里 isinstance(True, int) 为真，而 JSON 的 true 不是数。
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    v = float(value)
+    if v != v:          # NaN：任何比较都是 False，显式挡掉更清楚
+        return False
+    return lo <= v <= hi
 
 
 #: 供 tools/validate.py 做第 8 项交叉比对：常量 → Schema 里的字段路径。

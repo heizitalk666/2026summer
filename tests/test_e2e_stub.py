@@ -58,6 +58,10 @@ from patrol.uploader.node import UploaderNode
 #:
 #: 提大不影响正常运行：拿到一次成功的复核就 break，空闲机器上仍然十几秒返回。
 _DEADLINE_S = 240.0
+#: 找到成功证据包之后，再给 mission 线程多少时间把 PACK 记进 transitions。
+#: VERIFY → PACK 只差「收到复核报文」这一拍，正常在毫秒级；给 15 s 是留给
+#: 负载下被饿着的 mission 循环。等不到仍然判失败，不掩盖真的状态机缺陷。
+_PACK_GRACE_S = 15.0
 
 
 def _load(free_ports, tmp_path) -> Config:
@@ -139,6 +143,27 @@ class _Rig:
                 return m
         return None
 
+    def wait_for_state(self, state: str, timeout_s: float) -> bool:
+        """等状态机把 state 记进 transitions，最多等 timeout_s。
+
+        **这不是给用例兜底的 sleep，它补的是一处真实的缺口。**
+        `successful()` 读的是 uploader 线程落盘的 manifest.json，而
+        `transitions` 由 mission 线程的 FSM 回调写——两条线各跑各的，
+        uploader 配对完 before/after 就落盘，不等 mission 走到 PACK
+        （`fsm.py::_st_verify` 要先收到复核 DetectionEvent 才 `_goto(PACK)`）。
+
+        所以「manifest 已落盘」推不出「mission 已记下 PACK」。机器一忙
+        （日志里成片的 `单帧超出节拍`）mission 循环被饿着，用例就会在
+        VERIFY 和 PACK 之间把 rig 停掉，于是 PACK 断言假红——实测 20 次 2 次。
+        失败那轮系统本身是对的：证据包照出、verify_success 为真。
+        """
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < timeout_s:
+            if any(nxt == state for _, nxt, _ in self.transitions):
+                return True
+            time.sleep(0.1)
+        return False
+
 
 @pytest.mark.slow
 def test_end_to_end_verify_cycle(free_ports, tmp_path):
@@ -152,6 +177,10 @@ def test_end_to_end_verify_cycle(free_ports, tmp_path):
             if good is not None:
                 break
             time.sleep(0.5)
+        # manifest 落盘 ≠ mission 已记下 PACK，两条线没有因果顺序。
+        # 见 wait_for_state 的说明。等不到就不等，让下面的断言如实报出来。
+        if good is not None:
+            rig.wait_for_state("PACK", _PACK_GRACE_S)
     finally:
         rig.stop()
 

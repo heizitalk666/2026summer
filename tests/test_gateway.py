@@ -368,3 +368,77 @@ def test_ptz_rate_is_in_schema_but_still_gated_by_the_switch(gw):
     assert ack["result"] == "REJECTED"
     assert ack["reject_code"] == "NOT_IN_WHITELIST", ack
     gw.allow_rate = True
+
+
+# ------------------------------------------------- 畸形指令必须被"拒绝"，不是抛异常
+#
+# 背景（2026-09-11 结档复核）：`PTZ_RATE` 是差异清单 A1 的增补，**不在冻结
+# Schema 里**，所以 check_schema 那一步的 validate_structure 兜不住它的字段类型。
+# 别的指令有 JSON Schema 挡住 `"pan_dps": "abc"`，PTZ_RATE 没人挡，于是
+# check_range 里的 float("abc") 直接抛 ValueError。
+#
+# 而 node.handle_command 的五项校验**没有 try 包着**（只有 _dispatch 有），
+# 异常一路穿到 bus.Replier 的兜底，回给对面一条没有 result / checks / reject_code
+# 的残缺 ACK——更要命的是 `_reject` 没跑，于是：
+#   · 审计日志里查不到这条非法指令
+#   · ILLEGAL_COMMAND 的 SafetyEvent 也不会发
+# 网关存在的理由就是把越界指令**留痕**，所以这算安全边界上的一个洞。
+
+_MALFORMED = [
+    ("PTZ_RATE",      {"pan_dps": "abc", "tilt_dps": 0.0, "ttl_ms": 200}),
+    ("PTZ_RATE",      {"pan_dps": None, "tilt_dps": 0.0, "ttl_ms": 200}),
+    ("PTZ_RATE",      {"pan_dps": [1], "tilt_dps": 0.0, "ttl_ms": 200}),
+    # bool 单独列：Python 里 isinstance(True, int) 为真，JSON 的 true 不是数，
+    # 不显式挡掉的话 True 会被当成 1.0 悄悄放行。
+    ("PTZ_RATE",      {"pan_dps": True, "tilt_dps": 0.0, "ttl_ms": 200}),
+    ("PTZ_RATE",      {"pan_dps": 12.0, "tilt_dps": 0.0, "ttl_ms": "abc"}),
+]
+
+
+@pytest.mark.parametrize("cmd,params", _MALFORMED)
+def test_malformed_command_is_rejected_not_raised(gw, cmd, params):
+    """畸形参数走正常的拒绝通路，而不是把异常抛出 handle_command。"""
+    ack = gw.handle_command(mk(cmd, params))
+    assert ack["result"] == "REJECTED", ack
+    # 必须是一条完整的 ACK：残缺 ACK（bus 的兜底）没有这几个键
+    assert ack["reject_code"] in ("SCHEMA_INVALID", "PARAM_OUT_OF_RANGE"), ack
+    assert ack["checks"]["whitelist"] == "PASS"
+    assert ack["exec_handle"] is None
+    assert "_handler_error" not in ack
+
+
+def test_malformed_command_still_lands_in_the_audit_log(gw, tmp_path):
+    """拒绝要留痕。异常绕过 _reject 时审计日志是空的，这条就是钉住它的。"""
+    import json
+    from pathlib import Path
+
+    gw.handle_command(mk("PTZ_RATE", {"pan_dps": "abc", "tilt_dps": 0.0,
+                                      "ttl_ms": 200}))
+    rows = [json.loads(ln) for ln in
+            Path(gw.cfg.get("gateway.audit_log")).read_text(
+                encoding="utf-8").splitlines() if ln.strip()]
+    hit = [r for r in rows if r.get("command") == "PTZ_RATE"]
+    assert hit, "畸形 PTZ_RATE 没有进审计日志——_reject 被绕过了"
+    assert hit[-1]["result"] == "REJECTED"
+    assert hit[-1]["reject_code"] == "SCHEMA_INVALID"
+
+
+def test_in_range_says_false_instead_of_raising():
+    """in_range 是所有范围校验的咽喉点，非数值一律判越界。"""
+    from patrol.gateway import limits as L
+
+    for bad in ("abc", None, [1], {"a": 1}, True, False, float("nan")):
+        assert L.in_range(bad, L.PTZ_PAN_DPS) is False, bad
+    assert L.in_range(0.0, L.PTZ_PAN_DPS) is True
+    assert L.in_range(-60.0, L.PTZ_PAN_DPS) is True     # 闭区间
+    assert L.in_range(60.01, L.PTZ_PAN_DPS) is False
+
+
+def test_reject_detail_survives_a_non_numeric_value(gw):
+    """拼 reject_detail 时不许再 float() 一次——异常挪到措辞上一样绕过 _reject。
+
+    数值那一路的 ICD 格式不受影响，见 test_reject_detail_matches_icd_format。
+    """
+    ack = gw.handle_command(mk("CREEP_FORWARD", {"distance_m": "abc"}))
+    assert ack["result"] == "REJECTED"
+    assert "abc" in ack["reject_detail"]
