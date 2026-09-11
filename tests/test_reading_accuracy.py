@@ -193,3 +193,59 @@ def test_scene_priors_do_not_leak_truth():
     assert "value" not in pri, "先验里不能有真值，否则读数算法可以偷看"
     assert pri["range_min"] == 0.0 and pri["range_max"] == 1.6
     assert t.true_value is not None
+
+
+# ---------------------------------------------------- 角度依赖的根因（2026-09-11 定位）
+#
+# 背景：43 次独立标定里重复性一直超差，且**逐点差近 8 倍**（五个标定点的偏离
+# 中位 0.028°–0.219°）。此前排掉了检测框抖动（标定路径上 2450 次读数的
+# pixel_density 全是同一个值 149.460），但"到底是 pointer.py 的哪一步"一直没追到。
+#
+# 追不到是因为**它根本不在 pointer.py 里**。下面两条测试把根因钉住：
+#
+# 1. 同一角度重复读，误差逐位相同（极差 0.000000°）——它是每个指向上的一个
+#    **固定偏置**，不是噪声。所以"重复性"这个指标测到的并不是算法的随机性。
+# 2. 误差随分辨率按 ~1/size 衰减（log-log 斜率约 -0.85）——这是渲染出来的指针
+#    被栅格化、再被 warpPolar 重采样的采样效应，属于**虚拟表计本身的性质**，
+#    不是读数算法的缺陷。真机上指针不是画上去的，这一项会换成别的数。
+#
+# 后果要说清楚：150 px（复核态实际密度）下这一项的角标准差 0.82°，
+# 折合 0.305 %FS，**占掉 0.5 %FS 预算的六成**——它是当前最大的单项误差源，
+# 而它来自仿真。逐条数据见 deliverables/组长-系统/README.md。
+
+
+def test_angle_error_is_a_fixed_bias_not_noise():
+    """同一角度重复读，结果必须逐位相同。
+
+    这条一旦红了，说明读数通路里混进了随机源（未固定的 rng、时间相关的分支），
+    那时"重复性"才真的在测算法的随机性。现在它测的是别的东西。
+    """
+    for value in (0.4, 0.8, 1.2):
+        got = [_read(150, value).angle_deg for _ in range(5)]
+        assert max(got) - min(got) == 0.0, (
+            "同一角度读出了不同的角 %r——读数通路里有随机源" % got)
+
+
+def test_angle_error_shrinks_with_resolution():
+    """误差 ∝ 1/分辨率，证明它是采样效应而非固定的几何/约定错误。
+
+    约定错误（零位偏置、旋向、量程映射搞反）在任何分辨率下都是同一个角度值，
+    不会随 size 变小。所以这条测试是用来把两类原因分开的。
+    """
+    stds = []
+    for size in (100, 240, 700):
+        errs = []
+        for i in range(21):
+            value = 1.6 * i / 20.0
+            r = _read(size, value)
+            if not r.ok:
+                continue
+            truth = gauge_value_to_angle(value, 0.0, 1.6, 270.0, -135.0)
+            errs.append(((r.angle_deg - truth + 180.0) % 360.0) - 180.0)
+        assert len(errs) >= 15, "size=%d 有效读数太少" % size
+        stds.append(float(np.std(errs)))
+
+    assert stds[0] > stds[1] > stds[2], (
+        "误差没有随分辨率单调下降 %r——那它就不是采样效应，根因得重查" % stds)
+    # 700 px 至少要比 100 px 好一半以上；真是 1/size 的话是好 7 倍
+    assert stds[2] < 0.5 * stds[0], stds
