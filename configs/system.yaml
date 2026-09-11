@@ -207,6 +207,7 @@ mission:
     # 两个常数各自独立定，凑在一起会锁死：p_target=120 时只有巡航密度
     # ≤ 66.7 px 的目标才够得到 1.8×，比这更近的目标复核 100 % 在 VERIFY 超时。
     # 现在改判"云台有没有离开巡航姿态"，见 perception.node.verify_due。
+    # ⚠ 同本段开头：A3 未实现，这个阈值目前没有任何代码读。
     multiview_spread_limit_pct_fs: 0.5  # 三视角读数极差上限
   # 十状态机的预算与超时（ICD §7.2，C1 取 ICD 一侧）
   # CAPTURE 超时按 A3 放宽到 4.0 s，否则走辅视角路径必然超时进 ABORT

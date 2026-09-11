@@ -119,7 +119,7 @@ patrol/
 cloud/          FastAPI + SQLite 台账、人工复核、模型版本登记
 configs/        system / scene / stub / waypoints / camera / real
 training/       合成数据集生成、检测/分割/异常训练、ONNX 与 RKNN 导出
-tests/          524 条用例（398 个测试函数，参数化展开后 524）
+tests/          536 条用例（401 个测试函数，参数化展开后 536）
 ```
 
 ---
@@ -219,7 +219,7 @@ python -m patrol.tools.viewer --live         # 预览窗口，画面上叠加指
 | 识别 | 四路模型（检测 / 分割 / OCR / 异常）+ 显式仲裁全部在跑，见 [`docs/多模型协同.md`](docs/多模型协同.md) |
 | OCR 互证 | 已在跑真模型（RapidOCR，离线自带权重）；实测 90 px 以上可读，误判冲突全档为 0 |
 | 合成数据集 | 检测框 / 分割掩膜 / OCR / L3 正常集一次产出，掩膜与图像逐像素对齐 |
-| 测试 | 524 条用例（518 passed / 6 skipped），`validate` 59 项全绿。6 条 skip 是缺 `unet.onnx`（5）与 L3 未启用（1），不是失败 |
+| 测试 | 536 条用例（530 passed / 6 skipped），`validate` 59 项全绿。6 条 skip 是缺 `unet.onnx`（5）与 L3 未启用（1），不是失败 |
 | YOLO 权重 | ✅ 两级真权重已训出并接进过全链路（`cruise_ft` / `verify_ft`）。无泄漏真实 val：mAP50 0.9941、漏检 0.168 / 0.185 %；RTX 3060 单帧 22 / 43 ms @1280。⚠ **权重不在版本库里**（`.gitignore` 忽略 `*.pt`），所以仓库默认 `detector: synthetic`；要复现上面这组数，先按 `deliverables/甲-检测/artifacts/where.txt` 放好权重再改配置 |
 | RKNN 上板 | 转换与 INT8 掉点**已完成**（相对 L1 5.4 / 5.0 %，见 `deliverables/丙-异常/rknn/`）；只剩上板测速等硬件 |
 
