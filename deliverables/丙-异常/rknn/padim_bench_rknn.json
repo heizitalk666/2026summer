@@ -1,0 +1,102 @@
+{
+ "target": "rk3576",
+ "toolkit": "rknn-toolkit2 2.3.2",
+ "date": "2026-09-16",
+ "threshold": 0.55,
+ "eval_set": "out/l3_eval（training/bench_anomaly.py 生成）：正常 106 / 异常 120",
+ "scorer": "patrol/perception/anomaly.py::PadimNumpyAnomaly（板上同一份打分代码）",
+ "stats": {
+  "path": "training/runs/anomaly/padim_cov_stats.npz",
+  "sha256": "08aeacf71396e82a1d6ff5cb38fb804558b3433d854cf7b5dd5eff9cf2e10148"
+ },
+ "onnx": {
+  "padim_net2": {
+   "path": "training/runs/anomaly/padim_net2.onnx",
+   "sha256": "b7254a3efbe02beadd613481a791f22fc382b35be7d4928044e930c60a8a2cdf"
+  },
+  "padim_net3": {
+   "path": "training/runs/anomaly/padim_net3.onnx",
+   "sha256": "5f0e462ab694336cae9f50eccff1b37b0c70c1983e7963901ab05ab771d5de6c"
+  }
+ },
+ "rknn_config": "mean_values=[0,0,0], std_values=[255,255,255], quant_img_RGB2BGR=False；INT8 标定 calib_list.txt",
+ "torch_reference": {
+  "model": "padim_cov_s",
+  "fp": 4,
+  "fn": 4,
+  "fpr": 0.0377,
+  "fnr": 0.0333
+ },
+ "results": [
+  {
+   "backend": "onnxruntime",
+   "dtype": "fp32",
+   "n_normal": 106,
+   "n_anomaly": 120,
+   "fp": 4,
+   "fn": 4,
+   "fpr": 0.0377,
+   "fnr": 0.0333,
+   "mean_score_normal": 0.1017,
+   "mean_score_anomaly": 0.8891,
+   "s_per_roi": 0.031
+  },
+  {
+   "backend": "rknn-simulator",
+   "dtype": "int8",
+   "n_normal": 106,
+   "n_anomaly": 120,
+   "fp": 4,
+   "fn": 4,
+   "fpr": 0.0377,
+   "fnr": 0.0333,
+   "mean_score_normal": 0.1024,
+   "mean_score_anomaly": 0.8886,
+   "score_abs_diff_median": 0.0,
+   "score_abs_diff_p95": 0.0101,
+   "score_abs_diff_max": 0.0154,
+   "flips_vs_onnx": 0,
+   "s_per_roi": 0.103,
+   "files": {
+    "padim_net2": {
+     "bytes": 820178,
+     "sha256": "afb8aa24c24a807b627d5bf3dadab88c4bc27769aeaa34e5bdc28ed08110e474"
+    },
+    "padim_net3": {
+     "bytes": 2973010,
+     "sha256": "e99cc18b69959bf0f8ffb039761626dd82e19e90ffcb42f0db84da56b2417446"
+    }
+   }
+  },
+  {
+   "backend": "rknn-simulator",
+   "dtype": "fp",
+   "n_normal": 106,
+   "n_anomaly": 120,
+   "fp": 4,
+   "fn": 4,
+   "fpr": 0.0377,
+   "fnr": 0.0333,
+   "mean_score_normal": 0.1017,
+   "mean_score_anomaly": 0.8892,
+   "score_abs_diff_median": 0.0,
+   "score_abs_diff_p95": 0.0005,
+   "score_abs_diff_max": 0.0008,
+   "flips_vs_onnx": 0,
+   "s_per_roi": 0.0811,
+   "files": {
+    "padim_net2": {
+     "bytes": 1486456,
+     "sha256": "c6ab397e16b4e8a2bdf84fc304748dedb5b99be1a308089527f9d9ce66ce2942"
+    },
+    "padim_net3": {
+     "bytes": 5719992,
+     "sha256": "96b143b7b3d05e2b4873dbed210e07c3df83349a1f1fdaa16e709d793e7df886"
+    }
+   }
+  }
+ ],
+ "default_choice": "int8",
+ "rule": "INT8 的误报数、漏报数都不比 ONNX 多出 1 个以上，且翻转的判定不超过 2 %，才用 INT8，否则用 FP",
+ "note": "x86 模拟器上的数值对照；s_per_roi 是模拟器耗时，不代表板上速度"
+}

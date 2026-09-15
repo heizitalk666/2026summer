@@ -3,13 +3,14 @@
 
     python deploy/build_package.py \\
         --yolo-rknn-dir  \\\\wsl.localhost\\Ubuntu\\home\\<you>\\rknn\\yolo\\out \\
-        --padim-rknn-dir \\\\wsl.localhost\\Ubuntu\\home\\<you>\\rknn\\out
+        --padim-rknn-dir \\\\wsl.localhost\\Ubuntu\\home\\<you>\\rknn\\padim\\out --padim-dtype int8
 
 步骤：
 1. 收模型到 models/（.gitignore 挡掉，不进版本库）
    - 检测器：<yolo-rknn-dir>/<模型>_<精度>.rknn → models/<模型>.rknn，精度取
      deliverables/甲-检测/rknn/rknn_report.json 的 default_choice
-   - L3：<padim-rknn-dir>/padim_net{2,3}_<精度>.rknn → models/padim_net{2,3}.rknn，
+   - L3：<padim-rknn-dir>/padim_net{2,3}_<精度>.rknn → models/padim_net{2,3}.rknn（由
+     training/eval_padim_rknn.py 转出并评测，精度依据 deliverables/丙-异常/rknn/padim_bench_rknn.json），
      以及 training/runs/anomaly/padim_cov_stats.npz（没有就先跑 python -m training.export_padim_stats）
 2. 暂存：代码、配置、文档、deploy/、models/；把检测器实际精度写进暂存区的 configs/rk3576.yaml
 3. 写 SHA256SUMS 与 VERSION，打 tar.gz（.sh 带可执行位，Windows 上打也一样）

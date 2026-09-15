@@ -14,13 +14,18 @@ ultralytics：检测器与 L3 的特征网络在 NPU 上跑（rknn-toolkit-lite2
 | `deploy/install.sh` `deploy/run_edge.sh` `deploy/systemd/` | 安装脚本、前台启动脚本、systemd 服务 |
 | `SHA256SUMS` `VERSION` | 校验和、提交号与构建时间 |
 
-检测器精度的依据是 `deliverables/甲-检测/rknn/rknn_report.json`：在 RKNN 模拟器上与 ONNX(FP32)
-逐框对照，INT8 相对 FP32 召回 ≥ 0.99 且置信度平均漂移 ≤ 0.05 才用 INT8，否则用 FP16。
-置信度也要管，因为复核触发按 0.25–0.60 的置信度带判。
+精度怎么定的：
+
+- **检测器 FP16。**依据 `deliverables/甲-检测/rknn/rknn_report.json`：在 RKNN 模拟器上与 ONNX(FP32)
+  逐框对照，INT8 相对 FP32 召回 ≥ 0.99 且置信度平均漂移 ≤ 0.05 才用 INT8，否则用 FP16。
+  置信度也要管，因为复核触发按 0.25–0.60 的置信度带判。实测 cruise_ft 的 INT8 召回 1.0 但漂移 0.073，
+  verify_ft 的 INT8 召回 0.961，两个都用 FP16；FP16 在 40 帧上与 FP32 逐框一致（漂移 ≤ 0.0003）。
+- **L3 特征网络 INT8。**依据 `deliverables/丙-异常/rknn/padim_bench_rknn.json`：整套 L3 评测集
+  （106 正常 / 120 异常）上误报 4、漏报 4，与 ONNX 相同，没有一个判定翻转。
 
 ## 2. 在开发机上打包
 
-需要先有三样东西：
+需要先有这几样东西：
 
 ```bash
 # a. 从部署权重导 ONNX（Windows，ultralytics）
@@ -28,11 +33,15 @@ python -m training.export_onnx --detector training/runs/cruise_ft/weights/best.p
 python -m training.export_onnx --detector training/runs/verify_ft/weights/best.pt --imgsz 1280 --out-dir artifacts/verify_ft
 #    （产物名为 detector.onnx，改名为 best.onnx）
 
-# b. 转 RKNN 并在模拟器上评测（WSL2 / x86 Linux，rknn-toolkit2 2.3.2）
+# b. 检测器转 RKNN 并在模拟器上评测（WSL2 / x86 Linux，rknn-toolkit2 2.3.2）
 ~/rknn/.venv/bin/python training/export_rknn_yolo.py --repo /mnt/c/.../2026summer-main --work ~/rknn/yolo
 
 # c. 导出 PaDiM 统计量（Windows，需要 torch）
 python -m training.export_padim_stats
+
+# d. L3 特征网络转 RKNN，并在 L3 评测集上量误报漏报（WSL2）
+~/rknn/.venv/bin/python training/eval_padim_rknn.py --repo /mnt/c/.../2026summer-main \
+    --calib-list ~/rknn/calib_list.txt --work ~/rknn/padim
 ```
 
 然后：
@@ -40,7 +49,7 @@ python -m training.export_padim_stats
 ```bash
 python deploy/build_package.py \
     --yolo-rknn-dir  "\\wsl.localhost\Ubuntu\home\<用户>\rknn\yolo\out" \
-    --padim-rknn-dir "\\wsl.localhost\Ubuntu\home\<用户>\rknn\out"
+    --padim-rknn-dir "\\wsl.localhost\Ubuntu\home\<用户>\rknn\padim\out" --padim-dtype int8
 ```
 
 输出 `dist/patrol-rk3576-<日期>.tar.gz`。`models/` 与 `dist/` 都不进版本库。

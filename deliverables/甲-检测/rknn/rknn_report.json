@@ -1,0 +1,99 @@
+{
+ "target": "rk3576",
+ "toolkit": "rknn-toolkit2 2.3.2",
+ "date": "2026-09-16",
+ "input": "uint8 RGB NHWC 1280×1280，letterbox 补灰 114；模型内 mean=0 / std=255",
+ "calibration": {
+  "images": 200,
+  "virtual_frames": 170,
+  "real_gauge_photos": 30,
+  "source": "evidence/*/cruise_raw.jpg 与 verify_0[1-3].jpg 等距抽样 + seg_combined 的 PaddleX 真实表盘照片"
+ },
+ "evaluation": {
+  "frames": 40,
+  "reference": "同一份 ONNX 在 onnxruntime(FP32) 上的输出",
+  "match": "同类别 IoU ≥ 0.5",
+  "conf_threshold": 0.25,
+  "nms_iou": 0.45,
+  "note": "x86 模拟器上的数值对照，不是板上速度"
+ },
+ "results": [
+  {
+   "model": "cruise_ft",
+   "dtype": "int8",
+   "graph": "split",
+   "rknn_bytes": 16869718,
+   "onnx_bytes": 38395340,
+   "build_s": 417.7,
+   "frames": 40,
+   "fp32_boxes": 49,
+   "rknn_boxes": 49,
+   "matched": 49,
+   "recall_vs_fp32": 1.0,
+   "precision_vs_fp32": 1.0,
+   "conf_abs_diff_mean": 0.0727,
+   "conf_abs_diff_max": 0.1236,
+   "box_iou_mean": 0.9752,
+   "simulator_s_per_frame": 1.82
+  },
+  {
+   "model": "cruise_ft",
+   "dtype": "fp16",
+   "graph": "full",
+   "rknn_bytes": 77108664,
+   "onnx_bytes": 38395340,
+   "build_s": 17.4,
+   "frames": 40,
+   "fp32_boxes": 49,
+   "rknn_boxes": 49,
+   "matched": 49,
+   "recall_vs_fp32": 1.0,
+   "precision_vs_fp32": 1.0,
+   "conf_abs_diff_mean": 0.0002,
+   "conf_abs_diff_max": 0.0011,
+   "box_iou_mean": 0.9902,
+   "simulator_s_per_frame": 2.21
+  },
+  {
+   "model": "verify_ft",
+   "dtype": "int8",
+   "graph": "split",
+   "rknn_bytes": 31678870,
+   "onnx_bytes": 80887305,
+   "build_s": 902.8,
+   "frames": 40,
+   "fp32_boxes": 51,
+   "rknn_boxes": 49,
+   "matched": 49,
+   "recall_vs_fp32": 0.9608,
+   "precision_vs_fp32": 1.0,
+   "conf_abs_diff_mean": 0.0229,
+   "conf_abs_diff_max": 0.141,
+   "box_iou_mean": 0.9821,
+   "simulator_s_per_frame": 4.4
+  },
+  {
+   "model": "verify_ft",
+   "dtype": "fp16",
+   "graph": "full",
+   "rknn_bytes": 105693432,
+   "onnx_bytes": 80887305,
+   "build_s": 23.2,
+   "frames": 40,
+   "fp32_boxes": 51,
+   "rknn_boxes": 51,
+   "matched": 51,
+   "recall_vs_fp32": 1.0,
+   "precision_vs_fp32": 1.0,
+   "conf_abs_diff_mean": 0.0003,
+   "conf_abs_diff_max": 0.0031,
+   "box_iou_mean": 0.9894,
+   "simulator_s_per_frame": 4.82
+  }
+ ],
+ "default_choice": {
+  "cruise_ft": "fp16",
+  "verify_ft": "fp16"
+ },
+ "rule": "INT8 相对 FP32 召回 ≥ 0.99 且置信度平均漂移 ≤ 0.05 才用 INT8（复核触发按 0.25–0.60 置信度带判，漂移大了会改变触发），否则用 FP16"
+}

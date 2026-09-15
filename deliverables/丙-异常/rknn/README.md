@@ -22,6 +22,27 @@
 给 RKNN 传了已经 `/255` 的 float,而 config 里又写着 `std_values=[255,255,255]`,
 等于除了两次 255。这类错误不会报错,只会得到一个看着"合理"的坏数字。
 
+## 量到判定:整套 L3 评测集(2026-09-16)
+
+特征差 5 % 会不会改判,得在判定这一层量。`training/eval_padim_rknn.py` 用
+`bench_anomaly` 生成的同一份评测集(106 正常 / 120 异常),特征分别走 ONNX(FP32)
+和 RKNN 模拟器,打分用板上同一份 `PadimNumpyAnomaly`,阈值 0.55:
+
+| 特征网络 | 误报 | 漏报 | 相对 ONNX 翻转的判定 | 异常分差 P95 / 最大 |
+|---|---|---|---|---|
+| ONNX FP32(参照) | 4(3.8 %) | 4(3.3 %) | — | — |
+| RKNN INT8 | 4(3.8 %) | 4(3.3 %) | **0** | 0.010 / 0.015 |
+| RKNN FP | 4(3.8 %) | 4(3.3 %) | 0 | 0.0005 / 0.0008 |
+
+与 torch 版 `bench_anomaly` 的 3.8 % / 3.3 % 相同。INT8 一个判定都没改,部署包默认用 INT8。
+明细在 `padim_bench_rknn.json`。部署包里的 .rknn 就是这次评测时转出来的文件,哈希记在报告里
+(RKNN 每次转换出的文件字节不同,所以不拿 09-09 那一份去装车)。
+
+```bash
+~/rknn/.venv/bin/python training/eval_padim_rknn.py --repo /mnt/c/.../2026summer-main \
+    --calib-list ~/rknn/calib_list.txt --work ~/rknn/padim
+```
+
 ## 怎么复现
 
 ```bash
