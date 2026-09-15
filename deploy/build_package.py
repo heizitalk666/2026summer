@@ -32,6 +32,7 @@ STAGE_OF = {"cruise_ft": "cruise", "verify_ft": "verify"}
 INCLUDE = ["patrol", "cloud", "configs", "docs", "deploy", "models", "README.md", "LICENSE"]
 EXCLUDE_DIRS = {"__pycache__", "storage", ".pytest_cache"}
 EXCLUDE_FILES = {"patrol.db", "patrol.db-wal", "patrol.db-shm"}
+LF_SUFFIXES = {".sh", ".service", ".target"}
 
 
 def _sha256(p: Path) -> str:
@@ -98,7 +99,11 @@ def stage(repo: Path, out_dir: Path, version: str, choice: dict) -> Path:
                 continue
             t = root / rel
             t.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(p, t)
+            if p.suffix in LF_SUFFIXES:
+                # 板上直接执行的文件一律 LF：Windows 检出默认是 CRLF，shebang 行末多出 CR 就跑不起来
+                t.write_bytes(p.read_bytes().replace(b"\r\n", b"\n"))
+            else:
+                shutil.copyfile(p, t)
     _patch_quant(root / "configs" / "rk3576.yaml", choice)
     try:
         commit = subprocess.run(["git", "-C", str(repo), "rev-parse", "--short", "HEAD"],

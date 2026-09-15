@@ -45,6 +45,7 @@ def test_package_stage_and_tar(tmp_path):
     tar_path = b.make_tar(root)
     with tarfile.open(tar_path) as tar:
         members = {m.name: m for m in tar.getmembers()}
+    assert b"\r\n" not in (root / "deploy" / "install.sh").read_bytes(), "install.sh 必须是 LF"
     install = members["patrol-rk3576-test/deploy/install.sh"]
     assert install.mode & 0o111, "install.sh 在包里必须可执行"
     assert not any("__pycache__" in n for n in members)
