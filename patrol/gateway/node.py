@@ -35,7 +35,7 @@ from patrol.common.config import Config
 from patrol.common.errors import (DriverError, DriverNotReady, DriverTimeout,
                                   ParamOutOfRange)
 from patrol.common.ids import SeqCounter, new_uuid
-from patrol.common.logkit import JsonlSink, build_logger
+from patrol.common.logkit import JsonlSink, build_logger, fatal_guard
 from patrol.drivers.base import (ExecHandle, ExecProgress, IChassis, ICamera,
                                  ILocalizer, IPTZ, PTZSpeed, selftest)
 from patrol.drivers.factory import build_drivers
@@ -335,13 +335,15 @@ def main() -> int:
     ap.add_argument("--config", default=None)
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
-    node = GatewayNode(Config.load(a.config), seed=a.seed)
-    signal.signal(signal.SIGINT, lambda *_: node.stop())
-    signal.signal(signal.SIGTERM, lambda *_: node.stop())
-    try:
-        node.serve_forever()
-    finally:
-        node.close()
+    cfg = Config.load(a.config)
+    with fatal_guard("gateway", cfg):
+        node = GatewayNode(cfg, seed=a.seed)
+        signal.signal(signal.SIGINT, lambda *_: node.stop())
+        signal.signal(signal.SIGTERM, lambda *_: node.stop())
+        try:
+            node.serve_forever()
+        finally:
+            node.close()
     return 0
 
 

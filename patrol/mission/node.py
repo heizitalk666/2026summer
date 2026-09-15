@@ -24,7 +24,7 @@ from patrol.common.bus import RequestTimeout, Requester, Subscriber
 from patrol.common.clock import mono_ns, stamps
 from patrol.common.config import Config
 from patrol.common.ids import SeqCounter, new_run_id, new_uuid
-from patrol.common.logkit import build_logger, set_context
+from patrol.common.logkit import build_logger, fatal_guard, set_context
 from patrol.gateway import limits as L
 from patrol.mission.budget import build_budget
 from patrol.mission.fsm import Command, MissionFSM, State
@@ -236,10 +236,12 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="任务节点")
     ap.add_argument("--config", default=None)
     a = ap.parse_args()
-    node = MissionNode(Config.load(a.config))
-    signal.signal(signal.SIGINT, lambda *_: node.stop())
-    signal.signal(signal.SIGTERM, lambda *_: node.stop())
-    node.serve_forever()
+    cfg = Config.load(a.config)
+    with fatal_guard("mission", cfg):
+        node = MissionNode(cfg)
+        signal.signal(signal.SIGINT, lambda *_: node.stop())
+        signal.signal(signal.SIGTERM, lambda *_: node.stop())
+        node.serve_forever()
     return 0
 
 

@@ -94,13 +94,14 @@ class ChassisStub(IChassis):
             self._thr.start()
 
     # ------------------------------------------------------------ 内部
-    def _new_handle(self, kind: str) -> tuple[ExecHandle, _Job]:
+    def _new_handle(self, kind: str, *, local: bool = False) -> tuple[ExecHandle, _Job]:
         with self._lock:
             self._seq += 1
             h = ExecHandle(f"chassis-{kind.lower()}-{self._seq:04x}", mono_ns())
             # 丢包：指令在链路上丢了，句柄照给，但动作永远不会发生。
             # 状态机只能靠超时发现，这正是要测的路径。
-            dropped = self.rng.random() < self._ack_drop
+            # local=True 是底盘自己发起的动作（保活停车），不经过链路，不会丢。
+            dropped = (not local) and self.rng.random() < self._ack_drop
             job = _Job(kind, h, dropped=dropped)
             self._jobs[h.handle_id] = job
             return h, job
@@ -195,8 +196,8 @@ class ChassisStub(IChassis):
     def capabilities(self) -> ChassisCaps:
         return self._caps
 
-    def pause(self, reason: str) -> ExecHandle:
-        h, job = self._new_handle("PAUSE")
+    def pause(self, reason: str, *, local: bool = False) -> ExecHandle:
+        h, job = self._new_handle("PAUSE", local=local)
         with self._lock:
             if job.dropped:
                 return h                    # 指令丢了，车照常走，状态机会超时

@@ -25,7 +25,7 @@ from pathlib import Path
 from patrol.common.bus import Subscriber
 from patrol.common.clock import mono_ns
 from patrol.common.config import Config
-from patrol.common.logkit import build_logger
+from patrol.common.logkit import build_logger, fatal_guard
 from patrol.uploader.packer import EvidencePacker, decide_verdict
 from patrol.uploader.transport import UploadQueue
 
@@ -415,10 +415,12 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="上传节点")
     ap.add_argument("--config", default=None)
     a = ap.parse_args()
-    node = UploaderNode(Config.load(a.config))
-    signal.signal(signal.SIGINT, lambda *_: node.stop())
-    signal.signal(signal.SIGTERM, lambda *_: node.stop())
-    node.serve_forever()
+    cfg = Config.load(a.config)
+    with fatal_guard("uploader", cfg):
+        node = UploaderNode(cfg)
+        signal.signal(signal.SIGINT, lambda *_: node.stop())
+        signal.signal(signal.SIGTERM, lambda *_: node.stop())
+        node.serve_forever()
     return 0
 
 

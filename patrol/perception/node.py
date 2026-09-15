@@ -29,7 +29,7 @@ from patrol.common.bus import Publisher, Subscriber
 from patrol.common.clock import mono_ns, stamps
 from patrol.common.config import Config
 from patrol.common.ids import SeqCounter, new_uuid
-from patrol.common.logkit import build_logger, set_context
+from patrol.common.logkit import build_logger, fatal_guard, set_context
 from patrol.drivers.base import ExecProgress, ICamera, IPTZ, selftest
 from patrol.drivers.factory import build_drivers
 from patrol.perception.anomaly import build_anomaly
@@ -318,12 +318,31 @@ class PerceptionNode:
         """
         world = getattr(self.camera, "world", None)
         if world is None:
-            return None
+            # 真机相机没有渲染器的 world。标定表就是配置里 scene 那份目标清单（位置 + 先验），
+            # 另建一份只用来查先验、做投影匹配；原先这里直接 return None，真机上一条读数都不出。
+            world = self._calib_world()
+            if world is None:
+                return None
         if det.source_target_id is not None:
             t = world.by_id(det.source_target_id)
             if t is not None:
                 return t.priors
         return self._priors_by_projection(world, det, frame)
+
+    def _calib_world(self):
+        """按配置里的目标清单建一份标定表，建一次缓存。建不出来（没配目标）返回 None。"""
+        cached = getattr(self, "_calib_world_obj", None)
+        if cached is not None or getattr(self, "_calib_world_failed", False):
+            return cached
+        try:
+            from patrol.scene.world import World
+            self._calib_world_obj = World(self.cfg)
+        except Exception as e:  # noqa: BLE001
+            self._calib_world_failed = True
+            log = getattr(self, "log", None)
+            if log is not None:
+                log.error("标定表建不出来，读数不产出", error=str(e)[:200])
+        return getattr(self, "_calib_world_obj", None)
 
     def _priors_by_projection(self, world, det: Detection, frame) -> dict | None:
         """把标定表里的目标投影到当前画面，按 IoU 找出这个框对应哪一台。
@@ -1036,10 +1055,12 @@ def main() -> int:
     ap.add_argument("--config", default=None)
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
-    node = PerceptionNode(Config.load(a.config), seed=a.seed)
-    signal.signal(signal.SIGINT, lambda *_: node.stop())
-    signal.signal(signal.SIGTERM, lambda *_: node.stop())
-    node.serve_forever()
+    cfg = Config.load(a.config)
+    with fatal_guard("perception", cfg):
+        node = PerceptionNode(cfg, seed=a.seed)
+        signal.signal(signal.SIGINT, lambda *_: node.stop())
+        signal.signal(signal.SIGTERM, lambda *_: node.stop())
+        node.serve_forever()
     return 0
 
 

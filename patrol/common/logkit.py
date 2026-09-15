@@ -11,6 +11,8 @@ import logging
 import os
 import sys
 import threading
+import traceback
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -117,6 +119,30 @@ def build_logger(node: str, cfg=None, run_id: str | None = None) -> Logger:
     if run_id:
         set_context(run_id=run_id)
     return lg
+
+
+@contextmanager
+def fatal_guard(node: str, cfg=None):
+    """节点主循环外面套一层：未处理的异常先把完整 traceback 写进 logs/<node>.jsonl，再原样抛出。
+
+    进程照旧以非零码退出，run_all 的横幅照旧打；区别只在于事后能在日志里查到死因。
+    原先异常只打到终端，批量跑或挂长稳时终端早就翻过去了。
+    Ctrl-C 与 SystemExit 是正常退出路径，不记。
+    """
+    try:
+        yield
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except BaseException as e:  # noqa: BLE001
+        try:
+            lg = build_logger(node, cfg)
+            lg.critical("进程异常退出", exc_type=type(e).__name__, exc=str(e)[:500],
+                        traceback=traceback.format_exc())
+            if lg.sink is not None:
+                lg.sink.close()
+        except Exception:  # noqa: BLE001
+            pass
+        raise
 
 
 # logging 模块桥接：第三方库（uvicorn 等）的日志也进同一个流

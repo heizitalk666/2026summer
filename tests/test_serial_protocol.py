@@ -396,3 +396,61 @@ def test_pty_link_end_to_end(tmp_path):
         drv.close()
         car.close()
         link.close()
+
+
+
+def _car_states_until(car, me, want, budget_s):
+    """推进假小车，收集状态上报，直到出现 want 或超时。返回状态序列。"""
+    reader = P.LineReader()
+    states = []
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < budget_s:
+        car.step()
+        for line in reader.feed(me.read()):
+            try:
+                f = P.decode(line)
+            except P.ProtocolError:
+                continue
+            if f.type == P.RSP_STATUS:
+                states.append(P.parse_status(f)["state"])
+        if want in states:
+            break
+        time.sleep(0.005)
+    return states
+
+
+def _keepalive_car(tmp_path, drop_rate):
+    cfg = Config.load(overrides={
+        "logging": {"dir": str(tmp_path / "logs")},
+        "stub": {"chassis": {"stop_delay_ms": [120, 120], "ack_drop_rate": drop_rate,
+                             "safety_event_rate_per_min": 0.0}},
+        "real": {"serial": {"chassis": {"keepalive_s": 0.3}}}})
+    loop = LoopbackLink()
+    return loop.side_a(), FakeCar(cfg, loop.side_b())
+
+
+def test_keepalive_stop_survives_link_drops(tmp_path):
+    """链路丢包率拉到 100 %，保活停车照样生效。
+
+    保活停车是底盘自己发起的动作，不经过串口。原先它和上位机指令一样走丢包注入，
+    还只下发一次：那一次恰好被丢掉，车就一直走——本机上这条通路 6 次挂 3 次。
+    """
+    me, car = _keepalive_car(tmp_path, drop_rate=1.0)
+    try:
+        states = _car_states_until(car, me, "STOPPED", 12.0)
+        assert "STOPPED" in states, "链路全丢时保活停车没生效，状态序列 %s" % sorted(set(states))
+    finally:
+        car.close()
+
+
+def test_keepalive_stop_is_reasserted_while_link_is_down(tmp_path):
+    """保活丢失期间车又动了（比如一条迟到的恢复指令），下一个保活周期内必须再停下来。"""
+    me, car = _keepalive_car(tmp_path, drop_rate=0.0)
+    try:
+        assert "STOPPED" in _car_states_until(car, me, "STOPPED", 12.0)
+        car.chassis.resume()
+        assert "MOVING" in _car_states_until(car, me, "MOVING", 2.0)
+        states = _car_states_until(car, me, "STOPPED", 12.0)
+        assert "STOPPED" in states, "保活丢失期间车恢复行驶后没有再次停车，状态序列 %s" % sorted(set(states))
+    finally:
+        car.close()

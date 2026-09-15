@@ -34,7 +34,7 @@ import threading
 import time
 
 from patrol.common.config import Config
-from patrol.drivers.base import ExecProgress
+from patrol.drivers.base import ChassisState, ExecProgress
 from patrol.drivers.real import serial_protocol as P
 from patrol.drivers.stub.chassis_stub import ChassisStub
 from patrol.scene.world import World
@@ -57,6 +57,7 @@ class FakeCar:
         self._last_ping = time.monotonic()
         self.keepalive_s = float(cfg.get("real.serial.chassis.keepalive_s", 3.0))
         self._keepalive_tripped = False
+        self._last_stop_try = 0.0
         self._stop = threading.Event()
         self.chassis.subscribe_safety(self._on_safety)
 
@@ -144,11 +145,21 @@ class FakeCar:
         管"AI 进程死了"，保活管"串口断了或整个 RK3576 死了"。后者网关自己也
         救不了，只能由底盘兜底。两级都要有。
         """
-        if self._keepalive_tripped:
+        now = time.monotonic()
+        if now - self._last_ping <= self.keepalive_s:
             return
-        if time.monotonic() - self._last_ping > self.keepalive_s:
-            self._keepalive_tripped = True
-            self.chassis.pause("KEEPALIVE_LOST")
+        # 停车是底盘自己的动作，不走串口，所以 local=True，不受链路丢包注入影响。
+        # 保活丢失期间每个保活周期复查一次：车没在停就再下一次。原先只下一次，
+        # 那一次恰好被丢掉时车会一直走下去——保活存在的意义就是兜住这种情况。
+        if self._keepalive_tripped and now - self._last_stop_try < self.keepalive_s:
+            return
+        first = not self._keepalive_tripped
+        self._keepalive_tripped = True
+        self._last_stop_try = now
+        if self.chassis.status().state not in (ChassisState.STOPPING, ChassisState.STOPPED,
+                                              ChassisState.PAUSED, ChassisState.ESTOP):
+            self.chassis.pause("KEEPALIVE_LOST", local=True)
+        if first:
             self._on_safety({"event_type": "MOTOR_FAULT", "severity": "WARN",
                              "brake_latency_ms": 0,
                              "detail": "上位机保活超时，底盘自行停车"})
