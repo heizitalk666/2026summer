@@ -1,0 +1,19 @@
+[Unit]
+Description=RK3576 巡检系统 · 感知（patrol.perception.node）
+PartOf=patrol.target
+After=network-online.target
+After=patrol-gateway.service
+Wants=patrol-gateway.service
+
+[Service]
+Type=simple
+User=@USER@
+SupplementaryGroups=dialout video
+WorkingDirectory=@PREFIX@
+Environment=PYTHONPATH=@PREFIX@ PYTHONUNBUFFERED=1 PATROL_CONFIG=@PREFIX@/configs/rk3576.yaml
+ExecStart=@PREFIX@/venv/bin/python -m patrol.perception.node --config @PREFIX@/configs/rk3576.yaml
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=patrol.target

@@ -61,13 +61,14 @@ perception:
   onnx:
     weights_cruise: artifacts/cruise_ft/best.onnx
     weights_verify: artifacts/verify_ft/best.onnx
-    quant: FP32
     names: [PRESSURE_GAUGE, INDICATOR_LIGHT, SWITCH_HANDLE]
     providers: [CUDAExecutionProvider, CPUExecutionProvider]
   rknn:
     weights_cruise: models/cruise_ft.rknn
     weights_verify: models/verify_ft.rknn
-    quant: INT8
+    # 实际精度，按 deliverables/甲-检测/rknn/rknn_report.json 的 default_choice 选；打包时同步写进部署配置
+    quant_cruise: FP16
+    quant_verify: FP16
     names: [PRESSURE_GAUGE, INDICATOR_LIGHT, SWITCH_HANDLE]
     core_mask: AUTO          # AUTO | 0 | 1 | 0_1，RK3576 两个 NPU 核
   tracker:

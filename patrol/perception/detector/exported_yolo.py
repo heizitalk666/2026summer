@@ -1,9 +1,15 @@
 """导出后的 YOLO11 检测器：ONNX（本机）与 RKNN（RK3576 NPU）两个后端。
 
-两者跑的是同一张网络图：ultralytics 导出的 ONNX，输出 ``[1, 4 + nc, N]``，
-前 4 维是 letterbox 画布上的 cx, cy, w, h，后 nc 维是各类分数（已过 sigmoid）。
-RKNN 模型由 ``training/export_rknn_yolo.py`` 从同一份 ONNX 转出，输出形状不变。
-所以预处理、解码、NMS 只写一份，两个后端只在"怎么跑一次前向"上不同。
+模型有两种形态，按输出个数自动识别：
+
+- **整图**（1 个输出）：ultralytics 导出的 ONNX，输出 ``[1, 4 + nc, N]``，前 4 维是 letterbox
+  画布上的 cx, cy, w, h，后 nc 维是各类分数（已过 sigmoid）。FP32/FP16 用它。
+- **切头**（6 个输出）：在检测头解码之前截断，每个尺度各出一个框分支 ``[1, 64, H, W]``
+  （DFL 分布的 logits）与一个类别分支 ``[1, nc, H, W]``（logits）。**INT8 必须用它**：
+  整图把 0–1280 的坐标和 0–1 的分数拼在同一个输出里，INT8 一个缩放系数约 5 px 一档，
+  分数全被量化成 0，实测一个框都出不来。DFL、锚点与 sigmoid 挪到 numpy 里做（split_to_raw）。
+
+两种形态最后都还原成 ``[1, 4 + nc, N]``，预处理、解码、NMS 只写一份。
 
 预处理与 ultralytics 的 predict 一致：等比缩放到 imgsz、居中补灰（114）、BGR→RGB。
 ONNX 收 float32 NCHW（/255）；RKNN 模型在转换时写进了 mean=0 / std=255，
@@ -34,6 +40,37 @@ def letterbox(image: np.ndarray, size: int) -> tuple[np.ndarray, float, tuple[in
     canvas = np.full((size, size, 3), PAD_VALUE, dtype=np.uint8)
     canvas[py:py + nh, px:px + nw] = resized
     return np.ascontiguousarray(canvas[:, :, ::-1]), s, (px, py)
+
+
+def split_to_raw(outputs, size: int, reg_max: int = 16) -> np.ndarray:
+    """切头模型的 6 个输出 → 与整图一致的 ``[1, 4 + nc, N]``。
+
+    与 ultralytics 的 Detect 头逐项一致：DFL 在 reg_max 个区间上 softmax 取期望得到
+    左上右下四个距离，锚点是格子中心，乘步长回到画布像素；类别过 sigmoid。
+    尺度按特征图从大到小（步长 8 → 16 → 32）、格子按行优先排列，与 ONNX 里的顺序相同。
+    """
+    box = {}
+    cls = {}
+    for o in outputs:
+        o = np.asarray(o, dtype=np.float32)
+        if o.ndim == 3:
+            o = o[None]
+        (box if o.shape[1] == 4 * reg_max else cls)[o.shape[2]] = o[0]
+    xywh, scores = [], []
+    for h in sorted(box, reverse=True):
+        b, c = box[h], cls[h]
+        _, H, W = b.shape
+        stride = size / H
+        d = b.reshape(4, reg_max, H * W)
+        d = np.exp(d - d.max(axis=1, keepdims=True))
+        d = (d / d.sum(axis=1, keepdims=True) * np.arange(reg_max, dtype=np.float32)[None, :, None]).sum(axis=1)
+        gy, gx = np.meshgrid(np.arange(H, dtype=np.float32) + 0.5, np.arange(W, dtype=np.float32) + 0.5,
+                             indexing="ij")
+        ax, ay = gx.ravel(), gy.ravel()
+        x1, y1, x2, y2 = ax - d[0], ay - d[1], ax + d[2], ay + d[3]
+        xywh.append(np.stack([(x1 + x2) / 2, (y1 + y2) / 2, x2 - x1, y2 - y1]) * stride)
+        scores.append(1.0 / (1.0 + np.exp(-c.reshape(c.shape[0], H * W))))
+    return np.concatenate([np.concatenate(xywh, axis=1), np.concatenate(scores, axis=1)], axis=0)[None]
 
 
 def nms(boxes: np.ndarray, scores: np.ndarray, iou_thr: float) -> list[int]:
@@ -98,18 +135,21 @@ class _ExportedYolo(IDetector):
     """ONNX / RKNN 两个后端的公共部分。子类只实现 ``_load`` 与 ``_forward``。"""
 
     backend = "?"
-    quant = "FP32"
 
     def __init__(self, cfg, section: str):
         self.cfg = cfg
         sec = cfg.get("perception.%s" % section)
         self._paths = {"CRUISE": Path(sec.get("weights_cruise")),
                        "VERIFY": Path(sec.get("weights_verify") or sec.get("weights_cruise"))}
-        self.quant = str(sec.get("quant", self.quant))
         self._size = int(cfg.get("perception.model.input_w", 1280))
         self._nms = float(cfg.get("perception.model.nms_iou", 0.45))
         self._cfg_models = {"CRUISE": dict(cfg.get("perception.model.cruise")),
                             "VERIFY": dict(cfg.get("perception.model.verify"))}
+        # DetectionEvent.model.quant 只允许 INT8 / FP16（ICD 按上板精度定义）。RKNN 模型报实际精度，
+        # 由部署包按 rknn_report.json 的选择写进 quant_cruise / quant_verify；ONNX 与 .pt 后端一样报
+        # perception.model 里登记的上板精度。
+        self._quant = {s: str(sec.get("quant_%s" % s.lower(), self._cfg_models[s].get("quant", "INT8"))).upper()
+                       for s in ("CRUISE", "VERIFY")}
         # 类别下标 → 名字。训练时的顺序就是这三个，ONNX 元数据里的 names 也是这个顺序
         self._names = list(sec.get("names", ["PRESSURE_GAUGE", "INDICATOR_LIGHT", "SWITCH_HANDLE"]))
         self._classes = set(cfg.get("mission.first_release_classes", list(CLASS_SIZE_M)))
@@ -137,13 +177,15 @@ class _ExportedYolo(IDetector):
     def model_info(self, stage: str = "CRUISE") -> dict:
         c = self._cfg_models.get(stage, self._cfg_models["CRUISE"])
         return {"name": str(c.get("name", "yolo11s")), "input_w": self._size, "input_h": self._size,
-                "quant": self.quant, "conf_threshold": float(c.get("conf_threshold", 0.25)),
+                "quant": self._quant.get(stage, self._quant["CRUISE"]),
+                "conf_threshold": float(c.get("conf_threshold", 0.25)),
                 "nms_iou": self._nms}
 
     def infer(self, image: np.ndarray, *, conf_threshold: float, stage: str = "CRUISE") -> list[Detection]:
         sess = self._session(stage)
         canvas, scale, pad = letterbox(image, self._size)
-        raw = self._forward(sess, canvas)
+        outs = self._forward(sess, canvas)
+        raw = outs[0] if len(outs) == 1 else split_to_raw(outs, self._size)
         dets = decode(raw, conf_threshold=conf_threshold, iou_threshold=self._nms, scale=scale, pad=pad,
                       image_wh=(image.shape[1], image.shape[0]))
         out: list[Detection] = []
@@ -167,7 +209,6 @@ class OnnxYoloDetector(_ExportedYolo):
     """onnxruntime 后端。本机验证用，也可以在没有 NPU 的 Linux 上直接跑。"""
 
     backend = "ONNX"
-    quant = "FP32"
 
     def __init__(self, cfg):
         super().__init__(cfg, "onnx")
@@ -182,14 +223,13 @@ class OnnxYoloDetector(_ExportedYolo):
     def _forward(self, session, canvas_rgb: np.ndarray) -> np.ndarray:
         x = canvas_rgb.transpose(2, 0, 1)[None].astype(np.float32) / 255.0
         name = session.get_inputs()[0].name
-        return session.run(None, {name: x})[0]
+        return session.run(None, {name: x})
 
 
 class RknnYoloDetector(_ExportedYolo):
     """RK3576 NPU 后端（rknn-toolkit-lite2）。模型收 uint8 NHWC，归一化写在模型里。"""
 
     backend = "RKNN"
-    quant = "INT8"
 
     def __init__(self, cfg):
         super().__init__(cfg, "rknn")
@@ -206,5 +246,4 @@ class RknnYoloDetector(_ExportedYolo):
         return r
 
     def _forward(self, session, canvas_rgb: np.ndarray) -> np.ndarray:
-        outs = session.inference(inputs=[canvas_rgb[None]], data_format=["nhwc"])
-        return outs[0]
+        return session.inference(inputs=[canvas_rgb[None]], data_format=["nhwc"])

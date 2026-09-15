@@ -1,0 +1,15 @@
+# RK3576（aarch64 Linux，Python ≥ 3.10）边缘端依赖。不含 torch / ultralytics：
+# 检测与 L3 特征都在 NPU 上跑（rknn-toolkit-lite2），打分与后处理用 numpy。
+numpy>=1.26,<2
+opencv-python-headless>=4.9
+pyzmq>=25.0
+pyyaml>=6.0
+jsonschema>=4.20
+pyserial>=3.5
+requests>=2.31
+paho-mqtt>=1.6
+# OCR 互证（离线自带权重）。onnxruntime 有 aarch64 轮子
+rapidocr-onnxruntime>=1.2.3
+onnxruntime>=1.17
+# NPU 运行时。x86 上没有这个轮子，install.sh 会跳过并提示
+rknn-toolkit-lite2>=2.3.2 ; platform_machine == "aarch64"

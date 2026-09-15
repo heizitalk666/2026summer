@@ -43,6 +43,10 @@ class Config:
     @classmethod
     def load(cls, path: str | os.PathLike | None = None,
              overrides: dict | None = None) -> "Config":
+        # 不给路径时先看 PATROL_CONFIG：run_all --config 就是靠它把配置传给四个子进程的。
+        # 原先没人读这个环境变量，子进程一律加载默认 system.yaml，--config 只对 run_all 自己生效。
+        if not path:
+            path = os.environ.get("PATROL_CONFIG") or None
         p = Path(path) if path else CONFIG_DIR / "system.yaml"
         with open(p, encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}

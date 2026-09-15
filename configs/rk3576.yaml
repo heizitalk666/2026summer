@@ -1,0 +1,33 @@
+# RK3576 上车配置：在 system.yaml 之上只改驱动、检测器与 L3 后端。
+#
+#   python -m patrol.gateway.node --config configs/rk3576.yaml
+#   python -m patrol.tools.run_all --config configs/rk3576.yaml --no-cloud
+#
+# Config.load 只展开一层 includes，而且当前文件覆盖所有被引入的文件，
+# 所以这里把 system.yaml 与它自己引入的五份都列出来；system.yaml 放第一个，
+# 它的取值才会盖过 scene / stub / waypoints / camera / real 里的同名项。
+#
+# 部署前现场必须改的两处，见 deploy/README-deploy.md：
+#   1. real.yaml 的串口与相机设备号
+#   2. scene.yaml 的 targets：真机现场测得的每台设备位置、朝向、量程先验（标定表）
+includes:
+  - system.yaml
+  - scene.yaml
+  - stub.yaml
+  - waypoints.yaml
+  - camera.yaml
+  - real.yaml
+
+driver_mode: real
+
+perception:
+  # RKNN 模型由 training/export_rknn_yolo.py 转出，部署包放在 models/ 下。
+  # 默认精度按 deliverables/甲-检测/rknn/rknn_report.json 的 default_choice 选定，打包时写进 quant。
+  detector: rknn
+  l3:
+    # 无 torch 的 PaDiM：特征走 NPU 上的 padim_net2/net3，统计量是 numpy 文件
+    model: padim_np
+    backend: rknn
+    stats: models/padim_cov_stats.npz
+    net2: models/padim_net2.rknn
+    net3: models/padim_net3.rknn

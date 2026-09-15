@@ -93,3 +93,36 @@ def test_onnx_backend_matches_ultralytics(tmp_path, stage, weights):
     if total == 0:
         pytest.skip("这几帧 ultralytics 一个框都没出，无从对照")
     assert matched == total, "ONNX 后端与 ultralytics 逐框对不上：%d/%d" % (matched, total)
+
+
+@pytest.mark.parametrize("weights", ["cruise_ft", "verify_ft"])
+def test_split_head_reconstructs_full_output(weights):
+    """切头模型（INT8 用）+ numpy 版 DFL 解码，必须逐元素还原整图模型的输出。"""
+    ort = pytest.importorskip("onnxruntime")
+    full_p = ROOT / "artifacts" / weights / "best.onnx"
+    split_p = ROOT / "artifacts" / weights / "best_split.onnx"
+    frames = _frames()
+    if not (full_p.exists() and split_p.exists() and frames):
+        pytest.skip("需要 %s 与 %s（由 training/export_rknn_yolo.py 切出）" % (full_p, split_p))
+    from patrol.common.imio import imread
+    from patrol.perception.detector.exported_yolo import split_to_raw
+    full = ort.InferenceSession(str(full_p), providers=["CPUExecutionProvider"])
+    split = ort.InferenceSession(str(split_p), providers=["CPUExecutionProvider"])
+    assert len(split.get_outputs()) == 6
+    canvas, _, _ = letterbox(imread(frames[0]), 1280)
+    x = canvas.transpose(2, 0, 1)[None].astype(np.float32) / 255.0
+    ref = full.run(None, {"images": x})[0]
+    got = split_to_raw(split.run(None, {"images": x}), 1280)
+    assert got.shape == ref.shape
+    assert np.abs(got[0, 4:] - ref[0, 4:]).max() < 1e-4, "类别分数对不上"
+    assert np.abs(got[0, :4] - ref[0, :4]).max() < 0.05, "框坐标对不上（像素）"
+
+
+@pytest.mark.parametrize("kind", ["onnx", "rknn"])
+def test_model_info_quant_is_schema_valid(tmp_path, kind):
+    """DetectionEvent.model.quant 的 Schema 只允许 INT8 / FP16，报 FP32 整条报文都过不了校验。"""
+    from patrol.perception.detector.exported_yolo import OnnxYoloDetector, RknnYoloDetector
+    cfg = Config.load(overrides={"logging": {"dir": str(tmp_path)}})
+    det = (OnnxYoloDetector if kind == "onnx" else RknnYoloDetector)(cfg)
+    for stage in ("CRUISE", "VERIFY"):
+        assert det.model_info(stage)["quant"] in ("INT8", "FP16")

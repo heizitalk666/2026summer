@@ -1,0 +1,6 @@
+[Unit]
+Description=RK3576 巡检系统边缘端（网关、感知、任务、上传四进程）
+Wants=patrol-gateway.service patrol-perception.service patrol-mission.service patrol-uploader.service
+
+[Install]
+WantedBy=multi-user.target
