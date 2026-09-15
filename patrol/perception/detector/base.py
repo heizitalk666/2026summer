@@ -64,4 +64,10 @@ def build_detector(cfg, camera=None) -> IDetector:
     if kind == "yolo":
         from patrol.perception.detector.yolo import YoloDetector
         return YoloDetector(cfg)
-    raise ValueError("perception.detector 只能是 synthetic 或 yolo，收到 %r" % kind)
+    if kind == "onnx":
+        from patrol.perception.detector.exported_yolo import OnnxYoloDetector
+        return OnnxYoloDetector(cfg)
+    if kind == "rknn":
+        from patrol.perception.detector.exported_yolo import RknnYoloDetector
+        return RknnYoloDetector(cfg)
+    raise ValueError("perception.detector 只能是 synthetic / yolo / onnx / rknn，收到 %r" % kind)

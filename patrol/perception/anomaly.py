@@ -310,6 +310,82 @@ class PadimAnomaly(IAnomalyDetector):
         return AnomalyResult(self.model_name, s, self.threshold, s > self.threshold)
 
 
+class PadimNumpyAnomaly(IAnomalyDetector):
+    """PaDiM 全协方差版的无 torch 实现：特征走 ONNX（本机）或 RKNN（RK3576 NPU），打分用 numpy。
+
+    与 PadimAnomaly 同一套数：layer2 特征（128×32×32）与上采样到 32×32 的 layer3 特征
+    （256×16×16）拼成 384 维，每个位置取 idx 选中的 k 个通道算马氏距离，top-k 均值后按
+    训练集分数分布做 σ 归一化。统计量由 training/export_padim_stats.py 从 padim_cov.pt 导出。
+
+    两个特征网络都直接收图像（net3 = ResNet18 前 7 层），这是转 RKNN 时的切法，
+    所以板上每次打分跑两次前向。预处理：BGR→RGB、缩放到 256×256；ONNX 收 0–1 浮点 NCHW，
+    RKNN 模型转换时写进了 mean=0 / std=255，收 uint8 NHWC。
+    """
+
+    SIZE = 256
+
+    def __init__(self, stats: str, net2: str, net3: str, *, backend: str = "onnx",
+                 threshold: float = 0.55):
+        self.threshold = float(threshold)
+        self.backend = str(backend).lower()
+        self.model_name = "padim_cov_np_%s" % self.backend
+        z = np.load(stats)
+        self._mu = z["mu"].astype(np.float32)
+        self._inv = z["inv"].astype(np.float32)
+        self._idx = z["idx"].astype(np.int64)
+        self._d_mu = float(z["d_mu"])
+        self._d_sigma = float(max(1e-6, float(z["d_sigma"])))
+        self._topk_frac = float(z["topk_frac"])
+        if self.backend == "onnx":
+            import onnxruntime as ort
+            opts = ort.SessionOptions()
+            opts.intra_op_num_threads = 4
+            self._nets = [ort.InferenceSession(str(p), sess_options=opts,
+                                               providers=["CPUExecutionProvider"]) for p in (net2, net3)]
+        elif self.backend == "rknn":
+            from rknnlite.api import RKNNLite
+            self._nets = []
+            for p in (net2, net3):
+                r = RKNNLite()
+                if r.load_rknn(str(p)) != 0 or r.init_runtime(core_mask=RKNNLite.NPU_CORE_AUTO) != 0:
+                    raise RuntimeError("RKNN 特征网络加载失败：%s" % p)
+                self._nets.append(r)
+        else:
+            raise ValueError("perception.l3.backend 只能是 onnx 或 rknn，收到 %r" % backend)
+
+    def _run(self, net, rgb256: np.ndarray) -> np.ndarray:
+        if self.backend == "onnx":
+            x = rgb256.transpose(2, 0, 1)[None].astype(np.float32) / 255.0
+            return net.run(None, {net.get_inputs()[0].name: x})[0][0]
+        return np.asarray(net.inference(inputs=[rgb256[None]], data_format=["nhwc"])[0])[0]
+
+    def features(self, roi: np.ndarray) -> np.ndarray:
+        """BGR ROI → [384, 32, 32] 特征。"""
+        import cv2
+        h, w = roi.shape[:2]
+        interp = cv2.INTER_AREA if (w > self.SIZE or h > self.SIZE) else cv2.INTER_LINEAR
+        rgb = np.ascontiguousarray(cv2.resize(roi, (self.SIZE, self.SIZE), interpolation=interp)[:, :, ::-1])
+        f2 = self._run(self._nets[0], rgb).astype(np.float32)           # 128×32×32
+        f3 = self._run(self._nets[1], rgb).astype(np.float32)           # 256×16×16
+        f3u = cv2.resize(f3.transpose(1, 2, 0), (f2.shape[2], f2.shape[1]),
+                         interpolation=cv2.INTER_LINEAR).transpose(2, 0, 1)
+        return np.concatenate([f2, f3u], axis=0)
+
+    def score(self, image: np.ndarray, bbox=None) -> AnomalyResult:
+        roi = _crop(image, bbox)
+        if roi is None:
+            return AnomalyResult(self.model_name, 0.0, self.threshold, False)
+        f = self.features(roi)
+        C, H, W = f.shape
+        X = f.transpose(1, 2, 0).reshape(H * W, C)
+        Xp = np.take_along_axis(X, self._idx, axis=1) - self._mu
+        d = np.einsum("pk,pkj,pj->p", Xp, self._inv, Xp)
+        k = max(1, int(d.size * self._topk_frac))
+        topk = float(np.partition(d, d.size - k)[d.size - k:].mean())
+        s = float(np.clip((topk - self._d_mu) / self._d_sigma / 6.0, 0.0, 1.0))
+        return AnomalyResult(self.model_name, s, self.threshold, s > self.threshold)
+
+
 def _crop(image: np.ndarray, bbox):
     if bbox is None:
         return image
@@ -334,6 +410,14 @@ def build_anomaly(cfg) -> IAnomalyDetector | None:
         except Exception:
             # torch 缺失 / 权重损坏 / 下载预训练主干失败 → 退回统计法。
             # 接口约定：L3 是可降级通路，不能让可选依赖把感知节点拖停。
+            pass
+    if name == "padim_np":
+        # 无 torch 版（板上用）。加载失败同样退回统计法，理由同上
+        try:
+            return PadimNumpyAnomaly(cfg.get("perception.l3.stats"), cfg.get("perception.l3.net2"),
+                                     cfg.get("perception.l3.net3"),
+                                     backend=cfg.get("perception.l3.backend", "onnx"), threshold=thr)
+        except Exception:
             pass
     if name.startswith("padim") and weights and str(weights).endswith(".pt"):
         try:

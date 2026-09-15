@@ -56,6 +56,20 @@ perception:
     # 本机是 RTX 3060 Laptop（6.4 GB）。没有 CUDA 时必须改回 cpu——
     # 1280 输入在 CPU 上跑不进 100 ms 节拍。
     device: 0
+  # 导出后的同一张网络图，不依赖 torch/ultralytics。onnx 在本机与无 NPU 的 Linux 上跑；
+  # rknn 在 RK3576 NPU 上跑，模型由 training/export_rknn_yolo.py 转出。见 detector/exported_yolo.py
+  onnx:
+    weights_cruise: artifacts/cruise_ft/best.onnx
+    weights_verify: artifacts/verify_ft/best.onnx
+    quant: FP32
+    names: [PRESSURE_GAUGE, INDICATOR_LIGHT, SWITCH_HANDLE]
+    providers: [CUDAExecutionProvider, CPUExecutionProvider]
+  rknn:
+    weights_cruise: models/cruise_ft.rknn
+    weights_verify: models/verify_ft.rknn
+    quant: INT8
+    names: [PRESSURE_GAUGE, INDICATOR_LIGHT, SWITCH_HANDLE]
+    core_mask: AUTO          # AUTO | 0 | 1 | 0_1，RK3576 两个 NPU 核
   tracker:
     iou_threshold: 0.3
     max_age_frames: 15
