@@ -49,8 +49,8 @@ SECTIONS = ["研究背景与任务要求", "总体方案与技术路线", "关�
 MAP = [(1, "cover"), (2, "toc"), (13, "c"), (13, "c"), (5, "toc"),
        (13, "c"), (13, "c"), (13, "c"), (13, "c"), (13, "c"), (8, "toc"),
        (13, "c"), (13, "c"), (13, "c"), (13, "c"), (13, "c"), (13, "c"), (12, "toc"),
-       (13, "c"), (13, "c"), (13, "c"), (15, "toc"), (13, "c"), (13, "c"), (19, "end")]
-assert len(MAP) == 25
+       (13, "c"), (13, "c"), (13, "c"), (15, "toc"), (13, "c"), (13, "c"), (13, "c"), (19, "end")]
+assert len(MAP) == 26
 
 
 def run(args):
@@ -1135,8 +1135,36 @@ def s24(s):
          size=14.5, spacing=1.2, name="card_body")
 
 
+def s25(s):
+    content(s, L5_, "5.3 小组分工与协作")
+    ph = {"bold": True, "color": RED}                       # 姓名待填
+    rows = [["成员", "承担的模块", "主要产出与数据"],
+            [("吴明哲（组长）", {"bold": True}),
+             "系统集成与接口定义、主动复核状态机、安全网关、云台伺服与变焦增益调度、"
+             "指针读数与标定、证据链与云端、虚拟配电室、RK3576 部署与全系统测试",
+             "ICD v2.1 与五份 Schema、59 项一致性校验；读数与云台各三项指标；557 条测试；102.9 MB 部署包"],
+            [("【姓名】", ph),
+             "L1 目标检测：数据集制备与防泄漏检查、两级 YOLO11 混合微调、ONNX 导出与检出评测",
+             "mAP50 0.9941，漏检率 0.168 % / 0.185 %，单帧 22 / 43 ms"],
+            [("【姓名】", ph),
+             "L2 分割方案：U-Net 指针与刻度分割的数据集、训练与评测，以及与几何法的读数比选实验",
+             "指针 IoU 0.812；比选结论：读数不启用学习法"],
+            [("【姓名】", ph),
+             "L3 未知异常检测：PaDiM 与 EfficientAD 训练评测、正常样本集增广、特征网络 ONNX 与 RKNN 转换",
+             "误报 3.8 %、漏报 3.3 %；INT8 上板判定零翻转"]]
+    table(s, M, 1.12, [2.05, 5.6, 4.85], rows, row_h=0.74, size=11.5, name="table_roles")
+    y0 = card(s, M, 5.08, W - 2 * M, 1.62, "协作方式")
+    text(s, M + 0.25, y0 + 0.12, W - 2 * M - 0.5, 1.2, [
+        {"runs": [B("接口先冻结再写代码　", bold=True, color=NAVY), "ICD 评审 24 条决议全部落地，四个进程并行开发，联调按报文对齐"], "bullet": True, "gap": 6},
+        {"runs": [B("交付按人分目录　", bold=True, color=NAVY), "每个数都标证据等级：实测 / 桩构造 / 交付方报告 / 未验证"], "bullet": True, "gap": 6},
+        {"runs": [B("组长逐条复跑三条通路　", bold=True, color=NAVY), "两条一开始复现不出来，都定位到具体代码并修好，其中分割的指针 IoU 修完从 0.778 升到 0.812"], "bullet": True}],
+         size=12.5, spacing=1.2, name="card_body")
+    footnote(s, [{"runs": [B("组员姓名与各自的工作比例待填。", color=RED, bold=True),
+                           "分工口径与小组报告封面的成员名单一致。"]}], y=6.96)
+
+
 BUILDERS = {3: s03, 4: s04, 6: s06, 7: s07, 8: s08, 9: s09, 10: s10, 12: s12, 13: s13, 14: s14, 15: s15, 16: s16,
-            17: s17, 19: s19, 20: s20, 21: s21, 23: s23, 24: s24}
+            17: s17, 19: s19, 20: s20, 21: s21, 23: s23, 24: s24, 25: s25}
 
 
 def fix_footer(prs):
@@ -1190,7 +1218,7 @@ def fix_photo_footers(prs):
 
 def stage_b():
     prs = Presentation(SKELETON)
-    assert len(prs.slides) == 25, len(prs.slides)
+    assert len(prs.slides) == 26, len(prs.slides)
     for k, ((tpl, kind), dst) in enumerate(zip(MAP, prs.slides), 1):
         if kind == "cover":
             do_cover(dst)
