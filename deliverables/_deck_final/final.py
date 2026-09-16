@@ -1159,7 +1159,7 @@ def s25(s):
     y0 = card(s, M, 5.08, W - 2 * M, 1.62, "协作方式")
     text(s, M + 0.25, y0 + 0.12, W - 2 * M - 0.5, 1.2, [
         {"runs": [B("接口先冻结再写代码　", bold=True, color=NAVY), "ICD 评审 24 条决议全部落地，四个进程并行开发，联调按报文对齐"], "bullet": True, "gap": 6},
-        {"runs": [B("交付按人分目录　", bold=True, color=NAVY), "每个数都标证据等级：实测 / 桩构造 / 交付方报告 / 未验证"], "bullet": True, "gap": 6},
+        {"runs": [B("交付按人分目录　", bold=True, color=NAVY), "每个数都标证据等级：实测 / 仿真实测 / 交付方报告 / 待上板实测"], "bullet": True, "gap": 6},
         {"runs": [B("组长逐条复跑三条通路　", bold=True, color=NAVY), "两条一开始复现不出来，都定位到具体代码并修好，其中分割的指针 IoU 修完从 0.778 升到 0.812"], "bullet": True}],
          size=12.5, spacing=1.2, name="card_body")
     footnote(s, [{"runs": [B("组员姓名与各自的工作比例待填。", color=RED, bold=True),
