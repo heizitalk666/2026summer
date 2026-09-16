@@ -1,0 +1,17 @@
+# 演示与长稳用：在 system.yaml 之上只把检测器换成真权重（cruise_ft / verify_ft）。
+# L3 已经是 padim_s，驱动仍是 stub（虚拟配电室，按 stub.yaml 的故障率注入）。
+#
+#   python -m patrol.tools.run_all --config configs/demo_yolo.yaml --seconds 1800
+#
+# 权重不在版本库里（.gitignore 忽略 *.pt），按 deliverables/甲-检测/artifacts/where.txt
+# 放好之后才能用这份配置；否则 detector 首次推理会抛 FileNotFoundError。
+# 30 分钟长稳就是用它跑的，结果见 deliverables/组长-系统/artifacts/stability_30min.txt。
+includes:
+  - system.yaml
+  - scene.yaml
+  - stub.yaml
+  - waypoints.yaml
+  - camera.yaml
+
+perception:
+  detector: yolo
