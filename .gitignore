@@ -52,3 +52,12 @@ deliverables/中期答辩-旧稿*.pptx
 # 部署包与上板模型（deploy/build_package.py 生成，不进版本库）
 dist/
 models/
+
+# 答辩 PPT 骨架：由 final.py stage A 从学院模板生成，30 MB
+deliverables/_deck_final/skeleton_final.pptx
+
+# 学院给的模板（不是本项目的产出，31 MB / 几十 KB）。前者是 PPT stage A 的输入，
+# 见 deliverables/_deck_final/README.md；后两个是实训报告模板。
+C424 PPT模板-2024新.pptx
+测控系统综合实训小组报告模板.docx
+测控系统综合实训个人报告模板.docx
