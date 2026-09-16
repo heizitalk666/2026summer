@@ -119,7 +119,7 @@ patrol/
 cloud/          FastAPI + SQLite 台账、人工复核、模型版本登记
 configs/        system / scene / stub / waypoints / camera / real
 training/       合成数据集生成、检测/分割/异常训练、ONNX 与 RKNN 导出
-tests/          536 条用例（401 个测试函数，参数化展开后 536）
+tests/          557 条用例（425 个测试函数，参数化展开后 557）
 ```
 
 ---
@@ -154,12 +154,13 @@ python -m patrol.tools.tune_pid --out out/pid --compare-gain-schedule
 打包、安装、现场要改的配置（串口、相机、标定表、巡检路线）见 [`deploy/README-deploy.md`](deploy/README-deploy.md)。
 
 ```bash
-python deploy/build_package.py --yolo-rknn-dir <…/rknn/yolo/out> --padim-rknn-dir <…/rknn/out>   # 开发机
+python deploy/build_package.py --yolo-rknn-dir <…/rknn/yolo/out> --padim-rknn-dir <…/rknn/padim/out>  # 开发机
 sudo ./deploy/install.sh && sudo systemctl start patrol.target                                   # RK3576
 ```
 
 上车配置是 `configs/rk3576.yaml`：在 `system.yaml` 之上只改 `driver_mode: real`、`detector: rknn`
-与 L3 的 `padim_np`。真机相机没有渲染器的场景真值，读数先验按 `scene.yaml` 里的目标清单投影匹配，
+与 L3 的 `padim_np`。检测器用 FP16、L3 特征网络用 INT8，两个精度都是按模拟器上的评测结果选的
+（`deliverables/甲-检测/rknn/rknn_report.json`、`deliverables/丙-异常/rknn/padim_bench_rknn.json`）。真机相机没有渲染器的场景真值，读数先验按 `scene.yaml` 里的目标清单投影匹配，
 所以现场必须按实测位置录好这份标定表。
 
 真车到之前可以先用假小车把串口链路调通（它说 `docs/底盘串口协议.md` 定义的
@@ -216,14 +217,14 @@ python -m patrol.tools.viewer --live         # 预览窗口，画面上叠加指
 | 云台控制 | 3× 变焦下超调 1.0 %、调节时间 1.10 s、稳态 8.4 px（限值 10 % / 1.5 s / 20 px）达标 |
 | 接口基线 | **ICD v2.1**（v2.0 落地 D3 决议 24 条；v2.1 把 `delta_conf` 降为记录项、加派生指标 `l2_yield`）。报文 `schema_version` 仍是 **2.0.0**——v2.1 没动任何线上字段，见 ICD 的修订记录 |
 | 标定与整定记录 | 五点标定 + PID 阶跃响应已出（方案书 §11.1 交付物，此前覆盖率 0 %） |
-| 模型版本管理 | 云端已登记 **5 条**（此前 0 条），`register_models` 可复现 |
+| 模型版本管理 | 云端已登记 **7 条**（此前 0 条），部署的 `cruise_ft` / `verify_ft` / PaDiM 三条设为启用，`register_models` 可复现 |
 | A3 条件式辅视角 | **接口预留、首版不实现**（已定案）。`VERIFY_FRAME_AUX` 与 `multiview_spread` 已进 Schema 并过校验，证据包格式不会因补它而变；当前走默认的单视角连拍 3 帧。口径见 [`docs/催办清单.md`](docs/催办清单.md) 第五节 |
 | 识别 | 四路模型（检测 / 分割 / OCR / 异常）+ 显式仲裁全部在跑，见 [`docs/多模型协同.md`](docs/多模型协同.md) |
 | OCR 互证 | 已在跑真模型（RapidOCR，离线自带权重）；实测 90 px 以上可读，误判冲突全档为 0 |
 | 合成数据集 | 检测框 / 分割掩膜 / OCR / L3 正常集一次产出，掩膜与图像逐像素对齐 |
-| 测试 | 536 条用例（530 passed / 6 skipped），`validate` 59 项全绿。6 条 skip 是缺 `unet.onnx`（5）与 L3 未启用（1），不是失败 |
+| 测试 | 557 条用例，本机（权重齐全的 Windows）**555 passed / 2 skipped**，`validate` 59 项全绿。2 条 skip 是「L3 未启用」与「伪终端 POSIX 专有」（Windows 走 `--tcp`）；全新 clone 上缺 `unet.onnx` 等权重会再多跳几条，都不是失败 |
 | YOLO 权重 | ✅ 两级真权重已训出并接进过全链路（`cruise_ft` / `verify_ft`）。无泄漏真实 val：mAP50 0.9941、漏检 0.168 / 0.185 %；RTX 3060 单帧 22 / 43 ms @1280。⚠ **权重不在版本库里**（`.gitignore` 忽略 `*.pt`），所以仓库默认 `detector: synthetic`；要复现上面这组数，先按 `deliverables/甲-检测/artifacts/where.txt` 放好权重再改配置 |
-| RKNN 上板 | 转换与 INT8 掉点**已完成**（相对 L1 5.4 / 5.0 %，见 `deliverables/丙-异常/rknn/`）；只剩上板测速等硬件 |
+| RKNN 上板 | 两级检测器（FP16）与 L3 特征网络（INT8）都已转换并在模拟器上评测：检测器 FP16 与 ONNX 逐框一致，L3 INT8 在整套评测集上误报 / 漏报与 torch 版相同、0 个判定翻转。部署包已打（102.9 MB），在 x86 Linux 上解包、安装、`validate` 59 项、桩模式两轮全跑通。**只剩上板测速与联调等硬件** |
 
 **重复性按 2026-09-10 修订后的限值 0.4 % FS 达标（中位 0.309，39/43 合格），误差来源已经查清。**
 按原限值 0.3 是 29/43 超差，限值线正好穿过分布中间，修订理由见 `docs/指标汇总表.md` §一。

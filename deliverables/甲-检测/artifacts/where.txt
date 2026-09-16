@@ -1,48 +1,42 @@
-# ⚠ 先读这段（2026-09-10 复核补记）
+# 太大不进版本库的产物放哪（2026-09-16 更新）
 #
-# 下面写的「已在本地工作树里」「已复制到 ...」指的是**写这份记录那台机器**，
-# 不是版本库。在全新 clone 上实际情况是：
-#
-#   deliverables/甲-检测/best.pt                 ✅ 在（19 MB，见下方说明为何绕过 .gitignore）
-#   deliverables/甲-检测/verify/weights/best.pt  ❌ 不存在
-#   training/runs/{cruise,verify}*/weights/*.pt  ❌ 不存在（.gitignore:19 忽略 training/runs/）
-#   artifacts/{cruise,verify}/best.onnx          ❌ 不存在（全仓 find -name "*.onnx" 零命中）
-#
-# 因此 configs/system.yaml 的 perception.detector 默认是 synthetic；填 yolo 会在
-# 首次推理时抛 FileNotFoundError。要真跑 yolo，得先另行拿到上面两个 .pt。
-# **这一条没解决之前，L1 那组指标在别人机器上复现不出来。**
+# 一行一个，格式：<文件名>  <路径>  <大小>  <sha256 前 8 位>  <说明>
+# 「本机」指组长这台开发机。全新 clone 上只有标了「库内」的那一个。
 
-# 太大不进版本库的产物放哪
-#
-# 一行一个，格式：<文件名>  <链接或路径>  <大小>  <sha256 前 8 位>
+# ---- 部署的两级检测器（混合微调版，configs/system.yaml 的 perception.yolo）
+cruise_ft.pt     training/runs/cruise_ft/weights/best.pt      19,162,202 B   b23e04bb   yolo11s，本机
+verify_ft.pt     training/runs/verify_ft/weights/best.pt      40,501,228 B   419acb6c   yolo11m，本机
 
-# 两级权重都已在本地工作树里，**不需要再传**。核对过架构：
-best_cruise.pt   deliverables/甲-检测/best.pt                 19,162,202 B   b23e04bb   yolo11s
-best_verify.pt   deliverables/甲-检测/verify/weights/best.pt  40,509,676 B   b655d34c   yolo11m
+# deliverables/甲-检测/best.pt（库内，19 MB）与 cruise_ft.pt 逐字节相同。全新 clone 要跑 yolo，
+# 巡航级可以直接拷它；复核级 verify_ft.pt 不在库里，从权重备份包取。
+# training/runs/cruise/weights/best.pt 在本机也是这份文件：只用公开集训出来的巡航基线已被覆盖，不在了。
 
-# 已复制到 configs/system.yaml 实际读取的位置：
-#   perception.detector.weights_cruise → training/runs/cruise/weights/best.pt
-#   perception.detector.weights_verify → training/runs/verify/weights/best.pt
+# ---- 基线（只用公开集训练，不部署）
+verify_base.pt   deliverables/甲-检测/verify/weights/best.pt  40,509,676 B   b655d34c   yolo11m，本机
 
-# 说明：best.pt 曾被提交到 deliverables/甲-检测/ 根目录（19 MB）。
-# .gitignore:20 本来就有 *.pt，但 GitHub 网页版「Add files via upload」
-# 不走 .gitignore，所以绕过去了。**它仍在 git 历史里**，想彻底清掉要重写历史，
-# 那是共享分支上的破坏性操作，需要全组同意再做。
-#
+# ---- 导出的网络图（2026-09-15 从上面两个部署权重重导，1280 输入，本机）
+cruise_ft.onnx        artifacts/cruise_ft/best.onnx           38,395,340 B   fc381de5
+verify_ft.onnx        artifacts/verify_ft/best.onnx           80,887,305 B   9dcbfdaa
+cruise_ft_split.onnx  artifacts/cruise_ft/best_split.onnx     37,737,537 B   5d64dbed   切头版，转 INT8 用
+verify_ft_split.onnx  artifacts/verify_ft/best_split.onnx     80,235,424 B   975aa1c5   切头版，转 INT8 用
+
+# ---- RK3576 模型（在部署包 dist/patrol-rk3576-<日期>.tar.gz 的 models/ 里）
+cruise_ft.rknn   models/cruise_ft.rknn                        77,108,664 B   9e6951b0   FP16
+verify_ft.rknn   models/verify_ft.rknn                       105,693,432 B   6111929f   FP16
+# 精度依据 deliverables/甲-检测/rknn/rknn_report.json：两个模型的 INT8 都没过门槛，用 FP16。
+# 重新转换出的 .rknn 字节会变，以部署包 SHA256SUMS 里记的为准。
+
+# ---- 备份
+# 以上权重、ONNX、RKNN 连同乙、丙的权重打在 dist/weights-backup-<日期>.zip，附 SHA256SUMS.txt，
+# 由组长上传网盘。链接：【待上传后填写】
+
+# ---- 历史说明
+# best.pt 曾被提交到 deliverables/甲-检测/ 根目录（19 MB）。.gitignore 本来就有 *.pt，
+# 但 GitHub 网页版「Add files via upload」不走 .gitignore，所以绕过去了。它仍在 git 历史里，
+# 想彻底清掉要重写历史，那是共享分支上的破坏性操作，需要全组同意再做。
 # 以后传大文件走 git 命令行（会被 .gitignore 挡住），别用网页版上传。
-
----
-
-# 权重齐了，但甲这一路仍缺的是**文本**，不是权重：
 #
-#   training/gen_yolo_renders.py          不存在。README 的复现命令第一条就是它
-#   training/train_detector.py            仓库版没有 --weights / --name 两个参数，
-#                                         而 README 的两条命令都用了，照敲会报
-#                                         unrecognized arguments
-#   cruise_ft / verify_ft 的 stage_meta.json + results.csv
-#                                         进库的 stage_meta 是**微调前**那版
-#                                         （巡航 0.9949 / 复核 0.9943），
-#                                         和一页纸上的数不是同一次训练
-#   ultralytics val 的原始输出            单帧耗时 ~15 ms、漏检率 0.17 % 的出处
-#
-# 这四样不到位，docs/指标汇总表.md 里 L1 那三行就一直是「不可复现」。
+# 此前这里列的四样缺口（gen_yolo_renders.py、train_detector.py 的 --weights/--name、
+# cruise_ft / verify_ft 的 stage_meta.json 与 results.csv、单帧耗时的出处）都已补齐：
+# 脚本在本目录，两份 stage_meta 在 figures/{cruise_ft,verify_ft}/，单帧耗时 22.0 / 43.4 ms
+# 是本机 RTX 3060 实测，见 docs/指标汇总表.md 第六节。

@@ -392,12 +392,21 @@ def test_register_models_reads_deliverables(tmp_path):
     for it in items:
         assert it["weights_sha"] is None or len(it["weights_sha"]) == 64, it["version"]
 
-    # 只能有一条 active，且必须是系统当前真正启用的那一路（零权重统计法）
+    # 每个 stage 至多一条 active，且必须是系统真正部署的那一路：
+    # 两级检测是混合微调的 _ft，L3 是 PaDiM 全协方差
     active = [it for it in items if it["activate"]]
-    assert len(active) == 1 and active[0]["stage"] == "anomaly", active
+    by_stage = {it["stage"]: it["version"] for it in active}
+    assert len(by_stage) == len(active), active
+    assert by_stage.pop("anomaly", "").startswith("padim"), active
+    assert by_stage == {"cruise": "yolo11s-cruise-ft", "verify": "yolo11m-verify-ft"}, by_stage
+
+    # 同一份权重不能登记成两个版本（基线路径被部署版覆盖时，基线的哈希必须留空）
+    shas = [it["weights_sha"] for it in items if it["weights_sha"]]
+    assert len(shas) == len(set(shas)), "同一份权重登记成了两个版本"
 
     db = tmp_path / "ledger.db"
     assert RM.main(["--db", str(db)]) == 0
     from cloud.db import Ledger
     got = Ledger(str(db)).models()
     assert len(got) == len(items)
+    assert sorted(m["version"] for m in got if m["active"]) == sorted(it["version"] for it in active)

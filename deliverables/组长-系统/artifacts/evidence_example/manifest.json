@@ -1,0 +1,124 @@
+{
+  "schema_version": "2.0.0",
+  "msg_type": "EVIDENCE_PACKAGE",
+  "run_id": "20260910-113122-0186",
+  "event_id": "7f123604-f11d-4c3b-ab18-bbaf8523204f",
+  "waypoint_id": "WP-04",
+  "ts_utc_ms": 1789011174252,
+  "verdict": {
+    "result": "READING_OK",
+    "defect_class": "PRESSURE_GAUGE",
+    "severity": "INFO",
+    "needs_human_review": false,
+    "confidence": 0.9551492407917976
+  },
+  "before": {
+    "confidence": 0.9108377695083618,
+    "pixel_density_px": 49.092,
+    "zoom": 1.0,
+    "est_distance_m": 5.080584172356587,
+    "defect_class": "PRESSURE_GAUGE",
+    "l2_reading": null
+  },
+  "after": {
+    "confidence": 0.8803979754447937,
+    "pixel_density_px": 139.204,
+    "zoom": 2.8113,
+    "est_distance_m": 5.0370932880092765,
+    "defect_class": "PRESSURE_GAUGE",
+    "l2_reading": {
+      "kind": "POINTER_GAUGE",
+      "value": 0.955266,
+      "unit": "MPa",
+      "range_min": 0.0,
+      "range_max": 1.6,
+      "in_normal_band": true,
+      "reading_confidence": 1.0,
+      "roi": [
+        886.3804321289062,
+        462.138427734375,
+        1025.733154296875,
+        601.3419799804688
+      ]
+    }
+  },
+  "gain": {
+    "delta_conf": -0.0304,
+    "pixel_density_ratio": 2.8356,
+    "verify_success": true
+  },
+  "timeline": [],
+  "files": [
+    {
+      "path": "cruise.jpg",
+      "role": "CRUISE_ANNOTATED",
+      "bytes": 87433,
+      "sha256": "508ed13b8e39d71dbba69a75ca7d58b25e2800e8bed9ed42db40ecbb5e72de1c",
+      "uploaded": false
+    },
+    {
+      "path": "cruise_clip.mp4",
+      "role": "CRUISE_VIDEO",
+      "bytes": 671123,
+      "sha256": "06bafba8c09f3ee722caec7d4053477d412f2f27ddb43bdbf57e82f8bcfea13b",
+      "uploaded": false
+    },
+    {
+      "path": "cruise_raw.jpg",
+      "role": "CRUISE_RAW",
+      "bytes": 80769,
+      "sha256": "36d25acd12d2f1e6221b0dbfd048d93c42e418bb411a98de87e9a7325aa1a95e",
+      "uploaded": false
+    },
+    {
+      "path": "fusion.json",
+      "role": "META_LOG",
+      "bytes": 2989,
+      "sha256": "29d3bf8b5cca05ff72499663813615382022c33944b34ea55bca4376dbe9bf0d",
+      "uploaded": false
+    },
+    {
+      "path": "meta.jsonl",
+      "role": "META_LOG",
+      "bytes": 723939,
+      "sha256": "bfd2465c9e8cf95b5c005ef0b5b7a5584ff5b05a7e0afaecad15bb93bd632bae",
+      "uploaded": false
+    },
+    {
+      "path": "mission_ctx.json",
+      "role": "META_LOG",
+      "bytes": 668,
+      "sha256": "18c4a6e3359509c580dac1895d7cd4f89babbd5e71dbe87156b42e9d866a203b",
+      "uploaded": false
+    },
+    {
+      "path": "verify_01.jpg",
+      "role": "VERIFY_FRAME",
+      "bytes": 61291,
+      "sha256": "3f7a9aded9dc62d9918a10664a5c5d0377c7cf5849f1c4d101e4ecddbab52de4",
+      "uploaded": false
+    },
+    {
+      "path": "verify_02.jpg",
+      "role": "VERIFY_FRAME",
+      "bytes": 61347,
+      "sha256": "8b6cac238fa9d7d86e00cef11e79ad68e0044a0140540fc3b0bbdd7256f6ed4c",
+      "uploaded": false
+    },
+    {
+      "path": "verify_03.jpg",
+      "role": "VERIFY_FRAME",
+      "bytes": 61416,
+      "sha256": "cf39baf922e373066f05493a4ef046382c03c7dbf2f58134bd4a7385d917dcf0",
+      "uploaded": false
+    },
+    {
+      "path": "verify_roi.jpg",
+      "role": "VERIFY_ROI",
+      "bytes": 5901,
+      "sha256": "955b5ed5a7b98ad135701363921598c7068b961bc232e80b23b93420e89c0d5e",
+      "uploaded": false
+    }
+  ],
+  "abort": null
+}

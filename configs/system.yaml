@@ -28,7 +28,8 @@ logging:
 # ---------------------------------------------------------------- 感知
 perception:
   fps: 10                   # 巡航态帧率。ICD §5.2：由跟踪连续性定，不是算力妥协
-  # synthetic | yolo。**仓库默认 synthetic，改动请连同下面这段一起读。**
+  # synthetic | yolo | onnx | rknn。onnx / rknn 是同一份权重导出后的网络图，不依赖 torch，
+  # 上板用 rknn（configs/rk3576.yaml）。**仓库默认 synthetic，改动请连同下面这段一起读。**
   # 真权重（cruise_ft / verify_ft）确实训出来了、也确实接进过全链路，指标见
   # docs/指标汇总表.md，但 .gitignore 忽略 *.pt 与 training/runs/，所以它们
   # 不在版本库里。此处若填 yolo，全新 clone 会在 detector 首次推理时抛

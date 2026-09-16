@@ -1,0 +1,103 @@
+{
+  "event_id": "7f123604-f11d-4c3b-ab18-bbaf8523204f",
+  "by_track": {
+    "413": {
+      "result": "READING_OK",
+      "defect_class": "PRESSURE_GAUGE",
+      "severity": "INFO",
+      "needs_human_review": false,
+      "confidence": 0.9551492407917976,
+      "reasons": [
+        "OCR 互证一致：读到 2 个刻度数字 [0.4, 0.8]（均置信 0.74），先验量程 [0, 1.6] → 全部落在先验量程内 → 一致",
+        "读数 0.955266 落在正常带内 → READING_OK"
+      ],
+      "evidence": {
+        "l1": {
+          "defect_class": "PRESSURE_GAUGE",
+          "conf_before": 0.9108,
+          "conf_after": 0.8804
+        },
+        "l2": {
+          "kind": "POINTER_GAUGE",
+          "value": 0.955266,
+          "unit": "MPa",
+          "range_min": 0.0,
+          "range_max": 1.6,
+          "in_normal_band": true,
+          "reading_confidence": 1.0,
+          "roi": [
+            886.3804321289062,
+            462.138427734375,
+            1025.733154296875,
+            601.3419799804688
+          ]
+        },
+        "l2_ocr": {
+          "cross_check": {
+            "ran": true,
+            "agree": true,
+            "scale_hits": 2,
+            "scale_total": 2,
+            "unit_agree": null,
+            "detail": "读到 2 个刻度数字 [0.4, 0.8]（均置信 0.74），先验量程 [0, 1.6] → 全部落在先验量程内 → 一致"
+          },
+          "state": null,
+          "value": null,
+          "conf": 0.0,
+          "raw": {
+            "lines": [
+              {
+                "text": "0.8",
+                "conf": 0.738,
+                "bbox": [
+                  945.8,
+                  491.2,
+                  964.6,
+                  502.0
+                ]
+              },
+              {
+                "text": "0.4",
+                "conf": 0.743,
+                "bbox": [
+                  914.6,
+                  513.3,
+                  931.8,
+                  522.4
+                ]
+              }
+            ],
+            "dial": {
+              "numbers": [
+                0.4,
+                0.8
+              ],
+              "unit": null,
+              "unit_conf": 0.0,
+              "number_conf": 0.74,
+              "lines": 2
+            },
+            "cross_check": {
+              "ran": true,
+              "agree": true,
+              "scale_hits": 2,
+              "scale_total": 2,
+              "unit_agree": null,
+              "detail": "读到 2 个刻度数字 [0.4, 0.8]（均置信 0.74），先验量程 [0, 1.6] → 全部落在先验量程内 → 一致"
+            }
+          }
+        },
+        "l3": {
+          "score": 0.2714,
+          "is_anomaly": false
+        },
+        "observation": {
+          "pixel_density_px": 139.204,
+          "density_target_px": 120.0,
+          "quality_score": 1.0,
+          "aborted": false
+        }
+      }
+    }
+  }
+}

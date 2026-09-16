@@ -1,0 +1,78 @@
+部署包验证记录（x86 Linux，不是板子）
+================================================================
+时间   2026-09-16
+环境   WSL2 Ubuntu x86_64 / Python 3.12（板子官方镜像一般是 3.10/3.11）
+包     dist/patrol-rk3576-20260916.tar.gz  102.9 MB
+步骤   解包 → deploy/install.sh --no-systemd → validate → 桩模式两轮
+说明   x86 上没有 NPU 运行时，install.sh 按环境标记跳过 rknn-toolkit-lite2 并提示；
+       第二轮用 ONNX 后端跑，走的是板上同一份 exported_yolo / PadimNumpyAnomaly 代码。
+
+---------------- 1. 包的完整性与依赖 ----------------
+Successfully installed Pillow-12.3.0 Shapely-2.1.2 attrs-26.1.0 certifi-2026.7.22 charset_normalizer-3.5.1 flatbuffers-25.12.19 idna-3.19 jsonschema-4.26.0 jsonschema-specifications-2025.9.1 numpy-1.26.4 onnxruntime-1.30.0 opencv-python-4.11.0.86 opencv-python-headless-4.11.0.86 packaging-26.3 paho-mqtt-2.1.0 protobuf-7.36.1 pyclipper-1.4.0 pyserial-3.5 pyyaml-6.0.3 pyzmq-27.2.0 rapidocr-onnxruntime-1.4.4 referencing-0.37.0 requests-2.34.2 rpds-py-2026.6.3 six-1.17.0 tqdm-4.70.1 typing-extensions-4.16.0 urllib3-2.7.0
+注意：当前不是 aarch64，没有安装 rknn-toolkit-lite2。检测器与 L3 需改用 onnx 后端才能在这台机器上跑。
+
+包内依赖检查：torch False  ultralytics False   （板上不装这两个）
+
+---------------- 2. 部署配置解析 ----------------
+### 部署配置解析
+driver_mode = real
+perception.detector = rknn
+perception.rknn.weights_cruise = models/cruise_ft.rknn
+perception.rknn.quant_cruise = FP16
+perception.rknn.quant_verify = FP16
+perception.l3.model = padim_np
+perception.l3.backend = rknn
+perception.l3.net2 = models/padim_net2.rknn
+stats {'mu': (1024, 100), 'inv': (1024, 100, 100), 'idx': (1024, 100)}
+models/cruise_ft.rknn 77108664
+models/verify_ft.rknn 105693432
+models/padim_net2.rknn 820178
+models/padim_net3.rknn 2973010
+
+---------------- 3. 接口一致性校验 ----------------
+接口一致性校验  ICD-RK3576-PATROL v2.0  报文 schema_version 2.0.0
+PASS  Schema 5 份、正例 6 条、反例 11 条、内嵌副本一致、算例与预算全部自洽、网关常量与 Schema 同步（共 59 项）
+
+---------------- 4. 桩模式 150 s（合成检测器，configs/system.yaml） ----------------
+====================================================================
+一轮巡检小结
+====================================================================
+证据包 6 个，复核成功率 83.3 %（目标 > 85 %）
+L2 读数产出 6/6（100.0 %，目标 > 80 %）
+本轮 run_id 20260916-020904-a1a7
+
+结论                      条数      平均Δconf        平均密度比
+READING_ABNORMAL         2       0.7174       1.0655
+READING_OK               4       0.4775       2.6612
+
+真缺陷组 Δconf 均值 = 0.7174（**记录项，非判据**，见 ICD v2.1 §6.4）
+提醒：FALSE_ALARM 组的 Δconf 为负是正常的，与真缺陷混在一起算均值会接近零（ICD §6.4）
+
+证据包目录 evidence/    日志 logs/
+
+---------------- 5. 桩模式 240 s（ONNX 检测器 + padim_np） ----------------
+后端确认：detector OnnxYoloDetector   anomaly PadimNumpyAnomaly padim_cov_np_onnx
+
+====================================================================
+一轮巡检小结
+====================================================================
+证据包 5 个，复核成功率 60.0 %（目标 > 85 %）
+L2 读数产出 5/5（100.0 %，目标 > 80 %）
+本轮 run_id 20260916-021138-965e
+（evidence/ 里另有 6 个更早轮次的证据包，未计入本轮）
+
+结论                      条数      平均Δconf        平均密度比
+INCONCLUSIVE             1       0.8894       0.0000
+READING_OK               4       0.2136       2.0719
+
+真缺陷组 Δconf 均值 = 本轮无真缺陷样本（**记录项，非判据**，见 ICD v2.1 §6.4）
+提醒：FALSE_ALARM 组的 Δconf 为负是正常的，与真缺陷混在一起算均值会接近零（ICD §6.4）
+
+证据包目录 evidence/    日志 logs/
+
+单帧超出节拍 581 次，中位 354 ms（x86 CPU 跑 1280 输入，节拍被打爆）。
+这一轮验的是「板上那条代码路径跑不跑得通」，成功率不能当指标用。
+两轮都没有 !! 行（无进程中途退出），logs/ 里没有 CRITICAL 记录。
+
+---------------- 仍未验证 ----------------
+板上安装与运行、NPU 单帧耗时、真实相机与串口时序。模拟器与 x86 的耗时都不代表板上速度。

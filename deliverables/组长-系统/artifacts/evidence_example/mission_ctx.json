@@ -1,0 +1,41 @@
+{
+ "event_id": "7f123604-f11d-4c3b-ab18-bbaf8523204f",
+ "track_id": 413,
+ "defect_class": "PRESSURE_GAUGE",
+ "waypoint_id": "WP-04",
+ "trigger_rule": "L2_UNREADABLE",
+ "target_zoom": 2.8113,
+ "used_aux": false,
+ "pose_xy": [
+  9.6758,
+  -3.1993
+ ],
+ "timeline": [
+  {
+   "state": "SUSPECT",
+   "duration_ms": 100
+  },
+  {
+   "state": "HALT_REQ",
+   "duration_ms": 2115
+  },
+  {
+   "state": "AIM",
+   "duration_ms": 1605
+  },
+  {
+   "state": "ZOOM",
+   "duration_ms": 1807
+  },
+  {
+   "state": "CAPTURE",
+   "duration_ms": 100
+  },
+  {
+   "state": "VERIFY",
+   "duration_ms": 1516
+  }
+ ],
+ "abort": null,
+ "final_state": "PACK"
+}

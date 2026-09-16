@@ -3,11 +3,13 @@
 #
 #   sudo ./deploy/install.sh                    # 装到 /opt/patrol，注册 systemd 服务
 #   ./deploy/install.sh --prefix ~/patrol --no-systemd   # 不要 root，只建环境，手动起
+#   PYTHON=/usr/bin/python3.11 ./deploy/install.sh ...   # 指定解释器（默认 python3）
 #
 # 做的事：校验 SHA256SUMS → 拷到 PREFIX → 建 venv 装依赖 → 跑接口一致性校验 → 注册服务。
 # 不会自动启动服务：现场配置（串口、相机、标定表）改好之后再 systemctl start patrol.target。
 set -euo pipefail
 
+PY="${PYTHON:-python3}"
 PREFIX=/opt/patrol
 RUN_USER="${SUDO_USER:-$(id -un)}"
 SYSTEMD=1
@@ -16,7 +18,7 @@ while [ $# -gt 0 ]; do
     --prefix) PREFIX="$2"; shift 2 ;;
     --user) RUN_USER="$2"; shift 2 ;;
     --no-systemd) SYSTEMD=0; shift ;;
-    -h|--help) sed -n '2,9p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
     *) echo "未知参数 $1" >&2; exit 2 ;;
   esac
 done
@@ -25,7 +27,7 @@ SRC="$(cd "$(dirname "$0")/.." && pwd)"
 say() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 
 say "检查 Python（需要 ≥ 3.10）"
-python3 - <<'PY'
+"$PY" - <<'PY'
 import sys
 if sys.version_info < (3, 10):
     raise SystemExit("Python %s 太旧，需要 3.10 以上" % sys.version.split()[0])
@@ -45,7 +47,10 @@ fi
 cd "$PREFIX"
 
 say "建 venv 并安装依赖（首次约需几分钟）"
-python3 -m venv venv
+if ! "$PY" -m venv venv; then
+  echo "建 venv 失败：多半是没装 venv 模块，Debian/Ubuntu 上先 sudo apt install python3-venv" >&2
+  exit 1
+fi
 venv/bin/pip install --upgrade pip >/dev/null
 venv/bin/pip install -r deploy/requirements-rk3576.txt
 if [ "$(uname -m)" != "aarch64" ]; then
