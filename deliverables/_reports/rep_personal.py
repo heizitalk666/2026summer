@@ -45,7 +45,8 @@ def _replace_runs(par, old_texts: list[str], new: str):
     if not runs:
         return
     runs[0].text = new
-    _hl(runs[0])
+    if new.startswith("【"):
+        _hl(runs[0])
     for r in runs[1:]:
         r.text = ""
 

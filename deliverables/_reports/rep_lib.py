@@ -65,7 +65,8 @@ def fill_date(par, y: str, m: str, d: str):
                 tgt = blanks[-1]
                 pad = max(1, len(tgt.text) - _cjk_width(val))
                 tgt.text = " " + val + " " * pad
-                _hl(tgt)
+                if val.startswith("【"):
+                    _hl(tgt)
 
 
 def set_text(par, text: str, highlight: bool = False):
