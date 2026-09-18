@@ -201,6 +201,7 @@ def add_blocks(doc, blocks):
             _, caption, header, rows = blk
             cp = no_indent(doc.add_paragraph(caption, style=cap_style))
             cp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            cp.paragraph_format.keep_with_next = True      # 表题和表不拆到两页
             t = doc.add_table(rows=1, cols=len(header))
             t.style = "Table Grid"
             t.alignment = WD_ALIGN_PARAGRAPH.CENTER
