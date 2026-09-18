@@ -148,7 +148,7 @@ def _cell(cell, text, bold=False):
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER if bold else WD_ALIGN_PARAGRAPH.LEFT
     p.paragraph_format.space_before = Pt(2)
     p.paragraph_format.space_after = Pt(2)
-    p.paragraph_format.first_line_indent = Inches(0)
+    no_indent(p)
     for i, seg in enumerate(text.split("\n")):
         r = p.add_run(("\n" if i else "") + seg)
         r.bold = bold or seg.startswith("**")
@@ -217,6 +217,7 @@ def add_blocks(doc, blocks):
             p = no_indent(doc.add_paragraph())
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             p.paragraph_format.space_before = Pt(6)
+            p.paragraph_format.keep_with_next = True       # 图和图题不拆到两页
             p.add_run().add_picture(path, width=Inches(width))
             cp = no_indent(doc.add_paragraph(caption, style=cap_style))
             cp.alignment = WD_ALIGN_PARAGRAPH.CENTER
